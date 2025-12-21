@@ -8,8 +8,7 @@ package trellis where
   ]
 
 -- Test dependencies
-require crucible from git
-  "https://github.com/nathanial/crucible.git" @ "master"
+require crucible from ".." / "crucible"
 
 @[default_target]
 lean_lib Trellis where
