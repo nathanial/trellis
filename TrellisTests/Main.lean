@@ -486,4 +486,4 @@ test "grid creates implicit rows for overflow items" := do
 end TrellisTests
 
 def main : IO UInt32 := do
-  Crucible.runTests "Trellis Layout Tests" TrellisTests.cases
+  runAllSuites
