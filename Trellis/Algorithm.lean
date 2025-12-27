@@ -289,65 +289,141 @@ def partitionIntoLines (items : Array FlexItemState) (wrapMode : FlexWrap)
 def allFrozen (items : Array FlexItemState) : Bool :=
   items.all (·.frozen)
 
-/-- Distribute positive free space (grow). -/
-def distributeGrowth (line : FlexLine) (freeSpace : Length)
-    (gap : Length) : FlexLine :=
-  let totalGrow := line.totalFlexGrow
-  if totalGrow <= 0 then
-    -- No items can grow, use hypothetical sizes
-    let items := line.items.map fun item =>
-      { item with resolvedMainSize := item.hypotheticalMainSize }
-    { line with items }
-  else
-    -- Simple one-pass distribution (without iterative constraint handling for now)
+/-- Calculate total flex grow of unfrozen items. -/
+def unfrozenFlexGrow (items : Array FlexItemState) : Float :=
+  items.foldl (fun acc item => if item.frozen then acc else acc + item.flexGrow) 0
+
+/-- Calculate total scaled flex shrink of unfrozen items. -/
+def unfrozenFlexShrinkScaled (items : Array FlexItemState) : Float :=
+  items.foldl (fun acc item =>
+    if item.frozen then acc else acc + item.flexShrink * item.flexBaseSize) 0
+
+/-- Calculate remaining free space for unfrozen items. -/
+def calculateFreeSpace (items : Array FlexItemState) (availableMain gap : Length) : Length :=
+  let gaps := gap * (items.size - 1).toFloat
+  let usedSpace := items.foldl (fun acc item =>
+    if item.frozen then
+      acc + item.resolvedMainSize + item.margin.horizontal
+    else
+      acc + item.hypotheticalMainSize + item.margin.horizontal) 0
+  availableMain - usedSpace - gaps
+
+/-- Distribute positive free space (grow) with iterative constraint resolution.
+    Per CSS Flexbox spec: distribute space, freeze items that violate constraints,
+    and repeat until all items are frozen or no violations occur. -/
+def distributeGrowth (line : FlexLine) (availableMain gap : Length) : FlexLine := Id.run do
+  -- Initialize: set all items to their hypothetical sizes, mark as unfrozen
+  let mut items := line.items.map fun item =>
+    { item with
+      resolvedMainSize := item.hypotheticalMainSize
+      frozen := item.flexGrow <= 0  -- Freeze items that can't grow
+    }
+
+  -- Iterative constraint resolution (max 100 iterations as safety)
+  for _ in [:100] do
+    if allFrozen items then break
+
+    let freeSpace := calculateFreeSpace items availableMain gap
+    if freeSpace <= 0 then break
+
+    let totalGrow := unfrozenFlexGrow items
+    if totalGrow <= 0 then break
+
     let spacePerGrow := freeSpace / totalGrow
-    let items := line.items.map fun item =>
-      if item.flexGrow <= 0 then
-        { item with resolvedMainSize := item.hypotheticalMainSize }
+    let mut anyFrozen := false
+    let mut newItems : Array FlexItemState := #[]
+
+    -- Distribute space to unfrozen items
+    for item in items do
+      if item.frozen then
+        newItems := newItems.push item
       else
         let growth := spacePerGrow * item.flexGrow
         let newSize := item.hypotheticalMainSize + growth
-        let clamped := min item.maxMainSize (max item.minMainSize newSize)
-        { item with resolvedMainSize := clamped }
+        -- Check for constraint violation
+        if newSize > item.maxMainSize then
+          anyFrozen := true
+          newItems := newItems.push { item with resolvedMainSize := item.maxMainSize, frozen := true }
+        else if newSize < item.minMainSize then
+          -- Shouldn't happen in grow, but handle it
+          anyFrozen := true
+          newItems := newItems.push { item with resolvedMainSize := item.minMainSize, frozen := true }
+        else
+          newItems := newItems.push { item with resolvedMainSize := newSize }
 
-    let newUsed := items.foldl (fun acc item =>
-      acc + item.resolvedMainSize + item.margin.horizontal) 0
-    let gaps := gap * (items.size - 1).toFloat
-    { line with items, usedMainSpace := newUsed + gaps }
+    items := newItems
 
-/-- Distribute negative free space (shrink). -/
-def distributeShrinkage (line : FlexLine) (overflow : Length)
-    (gap : Length) : FlexLine :=
-  let totalShrinkScaled := line.totalFlexShrinkScaled
-  if totalShrinkScaled <= 0 then
-    -- No items can shrink, use hypothetical sizes
-    let items := line.items.map fun item =>
-      { item with resolvedMainSize := item.hypotheticalMainSize }
-    { line with items }
-  else
-    -- Simple one-pass distribution
-    let items := line.items.map fun item =>
-      if item.flexShrink <= 0 || item.flexBaseSize <= 0 then
-        { item with resolvedMainSize := item.hypotheticalMainSize }
+    -- If no items were frozen this iteration, we're done
+    if !anyFrozen then
+      -- Freeze all remaining items
+      items := items.map fun item => { item with frozen := true }
+      break
+
+  let newUsed := items.foldl (fun acc item =>
+    acc + item.resolvedMainSize + item.margin.horizontal) 0
+  let gaps := gap * (items.size - 1).toFloat
+  { line with items, usedMainSpace := newUsed + gaps }
+
+/-- Distribute negative free space (shrink) with iterative constraint resolution.
+    Per CSS Flexbox spec: distribute shrinkage proportionally to (shrink × base size),
+    freeze items that hit min constraint, and repeat until done. -/
+def distributeShrinkage (line : FlexLine) (availableMain gap : Length) : FlexLine := Id.run do
+  -- Initialize: set all items to their hypothetical sizes, mark as unfrozen
+  let mut items := line.items.map fun item =>
+    { item with
+      resolvedMainSize := item.hypotheticalMainSize
+      frozen := item.flexShrink <= 0 || item.flexBaseSize <= 0  -- Freeze items that can't shrink
+    }
+
+  -- Iterative constraint resolution (max 100 iterations as safety)
+  for _ in [:100] do
+    if allFrozen items then break
+
+    let freeSpace := calculateFreeSpace items availableMain gap
+    if freeSpace >= 0 then break  -- No overflow
+
+    let overflow := -freeSpace
+    let totalShrinkScaled := unfrozenFlexShrinkScaled items
+    if totalShrinkScaled <= 0 then break
+
+    let mut anyFrozen := false
+    let mut newItems : Array FlexItemState := #[]
+
+    -- Distribute shrinkage to unfrozen items
+    for item in items do
+      if item.frozen then
+        newItems := newItems.push item
       else
         let shrinkRatio := (item.flexShrink * item.flexBaseSize) / totalShrinkScaled
         let shrinkage := overflow * shrinkRatio
         let newSize := item.hypotheticalMainSize - shrinkage
-        let clamped := max item.minMainSize newSize
-        { item with resolvedMainSize := clamped }
+        -- Check for min constraint violation
+        if newSize < item.minMainSize then
+          anyFrozen := true
+          newItems := newItems.push { item with resolvedMainSize := item.minMainSize, frozen := true }
+        else
+          newItems := newItems.push { item with resolvedMainSize := newSize }
 
-    let newUsed := items.foldl (fun acc item =>
-      acc + item.resolvedMainSize + item.margin.horizontal) 0
-    let gaps := gap * (items.size - 1).toFloat
-    { line with items, usedMainSpace := newUsed + gaps }
+    items := newItems
+
+    -- If no items were frozen this iteration, we're done
+    if !anyFrozen then
+      -- Freeze all remaining items
+      items := items.map fun item => { item with frozen := true }
+      break
+
+  let newUsed := items.foldl (fun acc item =>
+    acc + item.resolvedMainSize + item.margin.horizontal) 0
+  let gaps := gap * (items.size - 1).toFloat
+  { line with items, usedMainSpace := newUsed + gaps }
 
 /-- Resolve flexible lengths for a line. -/
 def resolveFlexibleLengths (line : FlexLine) (availableMain gap : Length) : FlexLine :=
   let freeSpace := availableMain - line.usedMainSpace
   if freeSpace >= 0 then
-    distributeGrowth line freeSpace gap
+    distributeGrowth line availableMain gap
   else
-    distributeShrinkage line (-freeSpace) gap
+    distributeShrinkage line availableMain gap
 
 /-! ## Phase 5: Cross Axis Sizing -/
 
@@ -539,19 +615,66 @@ def resolveToLength (size : TrackSize) (available : Length) : Option Length :=
     | _, _ => none
   | .fitContent maxLen => some maxLen
 
+/-- Calculate the minimum size of a track size (for auto-fill calculation). -/
+def minTrackSize (size : TrackSize) (available : Length) : Length :=
+  match size with
+  | .fixed dim => dim.resolve available 0
+  | .fr _ => 0  -- Fr tracks have no intrinsic minimum
+  | .minmax minTrack _ => minTrackSize minTrack available
+  | .fitContent _ => 0
+
+/-- Calculate how many times a repeat pattern fits in available space (for auto-fill/auto-fit). -/
+def calculateAutoRepeatCount (sizes : Array TrackSize) (available gap : Length) : Nat :=
+  if sizes.isEmpty then 0
+  else
+    -- Calculate minimum size of one repeat cycle
+    let cycleSize := sizes.foldl (fun acc s => acc + minTrackSize s available) 0
+    let cycleWithGap := cycleSize + gap * (sizes.size - 1).toFloat
+    if cycleWithGap <= 0 then 1  -- Avoid division by zero, at least 1 track
+    else
+      -- How many complete cycles fit?
+      let count := (available / cycleWithGap).toUInt64.toNat
+      max 1 count  -- At least 1 repeat
+
+/-- Expand track entries to a flat array of TrackSizes. -/
+def expandEntries (entries : Array TrackEntry) (available gap : Length) : Array TrackSize := Id.run do
+  let mut result : Array TrackSize := #[]
+  for entry in entries do
+    match entry with
+    | .single track => result := result.push track.size
+    | .repeat mode sizes =>
+      let repeatCount := match mode with
+        | .count n => n
+        | .autoFill => calculateAutoRepeatCount sizes available gap
+        | .autoFit => calculateAutoRepeatCount sizes available gap  -- Same as autoFill for now
+      for _ in [:repeatCount] do
+        for size in sizes do
+          result := result.push size
+  result
+
+/-- Get expanded track sizes from a GridTemplate (handles both legacy tracks and entries). -/
+def getExpandedSizes (template : GridTemplate) (available gap : Length) : Array TrackSize :=
+  if template.entries.isEmpty then
+    -- Use legacy tracks array
+    template.tracks.map (·.size)
+  else
+    -- Expand entries
+    expandEntries template.entries available gap
+
 /-- Initialize ResolvedTrack array from a GridTemplate. -/
-def initTracks (template : GridTemplate) (minCount : Nat) (available : Length := 0) : Array ResolvedTrack := Id.run do
-  let explicitCount := template.tracks.size
+def initTracks (template : GridTemplate) (minCount : Nat) (available : Length := 0) (gap : Length := 0) : Array ResolvedTrack := Id.run do
+  let expandedSizes := getExpandedSizes template available gap
+  let explicitCount := expandedSizes.size
   let count := max explicitCount minCount
   let mut tracks : Array ResolvedTrack := #[]
   for i in [:count] do
-    let size := if i < explicitCount then template.tracks[i]!.size else template.autoSize
+    let size := if i < explicitCount then expandedSizes[i]! else template.autoSize
     -- Extract fr value (including from minmax max)
     let frVal := extractFrValue size
     -- Extract min/max constraints from minmax
     let (minSize, maxSize) := match size with
-      | .minmax min maxT =>
-        let minL := resolveToLength min available
+      | .minmax minT maxT =>
+        let minL := resolveToLength minT available
         let maxL := resolveToLength maxT available
         (minL, maxL)
       | .fitContent maxLen => (none, some maxLen)
@@ -833,9 +956,11 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   -- Phase 1: Available space
   let (availableWidth, availableHeight) := computeAvailableSpace containerWidth containerHeight padding
 
-  -- Get explicit track counts
-  let explicitCols := container.templateColumns.tracks.size
-  let explicitRows := container.templateRows.tracks.size
+  -- Get explicit track counts (from expanded entries or legacy tracks)
+  let expandedCols := getExpandedSizes container.templateColumns availableWidth container.columnGap
+  let expandedRows := getExpandedSizes container.templateRows availableHeight container.rowGap
+  let explicitCols := expandedCols.size
+  let explicitRows := expandedRows.size
 
   -- Initialize items with content sizes and margins
   let mut items : Array GridItemState := #[]
@@ -857,9 +982,9 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   let minCols := max 1 explicitCols
   let (placedItems, actualRows, actualCols) := placeAllItems items container explicitRows minCols
 
-  -- Phase 3: Initialize and size tracks
-  let mut colTracks := initTracks container.templateColumns actualCols availableWidth
-  let mut rowTracks := initTracks container.templateRows actualRows availableHeight
+  -- Phase 3: Initialize and size tracks (pass gap for auto-fill/auto-fit calculation)
+  let mut colTracks := initTracks container.templateColumns actualCols availableWidth container.columnGap
+  let mut rowTracks := initTracks container.templateRows actualRows availableHeight container.rowGap
 
   -- Size tracks to content
   colTracks := sizeTracksToContent colTracks placedItems true availableWidth

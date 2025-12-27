@@ -34,25 +34,66 @@ def frValue : TrackSize → Float
 
 end TrackSize
 
+/-- Repeat mode for CSS repeat() function. -/
+inductive RepeatMode where
+  | count (n : Nat)  -- repeat(n, ...) - repeat exactly n times
+  | autoFill         -- repeat(auto-fill, ...) - fill container with tracks
+  | autoFit          -- repeat(auto-fit, ...) - fill and collapse empty tracks
+deriving Repr, BEq, Inhabited
+
 /-- A single grid track definition. -/
 structure GridTrack where
   size : TrackSize := .fixed .auto
   name : Option String := none  -- Optional line name
 deriving Repr, BEq, Inhabited
 
+/-- A track entry in a template (single track or repeat). -/
+inductive TrackEntry where
+  | single (track : GridTrack)
+  | repeat (mode : RepeatMode) (sizes : Array TrackSize)
+deriving Repr, BEq, Inhabited
+
+namespace TrackEntry
+
+/-- Create a single track entry from a size. -/
+def fromSize (size : TrackSize) : TrackEntry :=
+  .single { size }
+
+/-- Create a repeat entry with a count. -/
+def repeated (n : Nat) (sizes : Array TrackSize) : TrackEntry :=
+  .repeat (.count n) sizes
+
+/-- Create an auto-fill repeat entry. -/
+def autoFill (sizes : Array TrackSize) : TrackEntry :=
+  .repeat .autoFill sizes
+
+/-- Create an auto-fit repeat entry. -/
+def autoFit (sizes : Array TrackSize) : TrackEntry :=
+  .repeat .autoFit sizes
+
+end TrackEntry
+
 /-- Grid template for rows or columns. -/
 structure GridTemplate where
+  /-- Track entries (may include repeat() functions). -/
+  entries : Array TrackEntry := #[]
+  /-- Legacy: direct track array (for backwards compatibility). -/
   tracks : Array GridTrack := #[]
-  autoSize : TrackSize := .fixed .auto  -- Size for auto-generated tracks
+  /-- Size for auto-generated (implicit) tracks. -/
+  autoSize : TrackSize := .fixed .auto
 deriving Repr, BEq, Inhabited
 
 namespace GridTemplate
 
 def empty : GridTemplate := {}
 
-/-- Create a template from track sizes. -/
+/-- Create a template from track sizes (legacy, no repeats). -/
 def fromSizes (sizes : Array TrackSize) : GridTemplate :=
   { tracks := sizes.map (GridTrack.mk · none) }
+
+/-- Create a template from track entries (supports repeats). -/
+def fromEntries (entries : Array TrackEntry) : GridTemplate :=
+  { entries }
 
 /-- Create a template with n equal fr columns/rows. -/
 def repeated (n : Nat) (size : TrackSize := .fr 1) : GridTemplate :=
@@ -61,6 +102,22 @@ def repeated (n : Nat) (size : TrackSize := .fr 1) : GridTemplate :=
 /-- Create a template with specific pixel sizes. -/
 def pixels (sizes : Array Length) : GridTemplate :=
   { tracks := sizes.map fun s => { size := .fixed (.length s) } }
+
+/-- Create a template with a repeat() function. -/
+def withRepeat (mode : RepeatMode) (sizes : Array TrackSize) : GridTemplate :=
+  { entries := #[.repeat mode sizes] }
+
+/-- Create a template with repeat(n, size). -/
+def repeatCount (n : Nat) (sizes : Array TrackSize) : GridTemplate :=
+  { entries := #[.repeat (.count n) sizes] }
+
+/-- Create a template with repeat(auto-fill, sizes). -/
+def autoFill (sizes : Array TrackSize) : GridTemplate :=
+  { entries := #[.repeat .autoFill sizes] }
+
+/-- Create a template with repeat(auto-fit, sizes). -/
+def autoFit (sizes : Array TrackSize) : GridTemplate :=
+  { entries := #[.repeat .autoFit sizes] }
 
 end GridTemplate
 

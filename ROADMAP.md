@@ -36,18 +36,22 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ---
 
-### [Priority: High] CSS Grid `repeat()` Function Support
-**Description:** Add support for the CSS `repeat(count, track-size)` function in grid template definitions, including `repeat(auto-fill, ...)` and `repeat(auto-fit, ...)` for responsive track generation.
+### [COMPLETED] CSS Grid `repeat()` Function Support
+**Status:** ✅ Implemented
 
-**Rationale:** The `repeat()` function dramatically simplifies grid template definitions and enables responsive grids that automatically adjust column count.
+**What was done:**
+- Added `RepeatMode` enum for `count`, `autoFill`, and `autoFit` modes
+- Added `TrackEntry` type to support both single tracks and repeat entries
+- Modified `GridTemplate` to support `entries` array alongside legacy `tracks`
+- Implemented `expandEntries` to flatten repeat patterns into track arrays
+- Implemented `calculateAutoRepeatCount` for auto-fill/auto-fit responsive grids
+- Updated `layoutGridContainer` to use expanded track counts for grid sizing
+- Added 7 comprehensive tests for repeat() behavior
 
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Grid.lean` (new `RepeatFunction` type and modifications to `GridTemplate`)
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (track initialization logic)
-
-**Estimated Effort:** Large
-
-**Dependencies:** None
+**Files Changed:**
+- `Trellis/Grid.lean` - Added `RepeatMode`, `TrackEntry`, modified `GridTemplate`
+- `Trellis/Algorithm.lean` - Added expansion and auto-repeat logic
+- `TrellisTests/Main.lean` - Added repeat() test suite
 
 ---
 
@@ -187,17 +191,19 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ---
 
-### [Priority: High] Iterative Flex Resolution for Constraint Compliance
-**Current State:** The flex grow/shrink distribution (lines 289-346) uses a single-pass algorithm with a comment noting it lacks "iterative constraint handling."
+### [COMPLETED] Iterative Flex Resolution for Constraint Compliance
+**Status:** ✅ Implemented
 
-**Proposed Change:** Implement the full CSS Flexbox algorithm that iteratively freezes items that violate min/max constraints and redistributes remaining space.
+**What was done:**
+- Rewrote `distributeGrowth` with iterative constraint resolution loop
+- Rewrote `distributeShrinkage` with iterative constraint resolution loop
+- Items that hit min/max constraints are frozen, remaining space redistributed to unfrozen items
+- Added helper functions: `unfrozenFlexGrow`, `unfrozenFlexShrinkScaled`, `calculateFreeSpace`
+- Added 5 comprehensive tests for constraint edge cases
 
-**Benefits:** Correct behavior per CSS Flexbox specification when items hit their min/max constraints during flex resolution.
-
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (lines 282-346, `distributeGrowth`, `distributeShrinkage`)
-
-**Estimated Effort:** Medium
+**Files Changed:**
+- `Trellis/Algorithm.lean` - Iterative grow/shrink algorithms
+- `TrellisTests/Main.lean` - Added constraint resolution test suite
 
 ---
 
@@ -497,18 +503,20 @@ layout do
 
 | Category | High | Medium | Low | Completed |
 |----------|------|--------|-----|-----------|
-| Features | 1 | 5 | 3 | 2 |
-| Improvements | 2 | 5 | 3 | 0 |
+| Features | 0 | 5 | 3 | 3 |
+| Improvements | 1 | 5 | 3 | 1 |
 | Cleanup | 2 | 3 | 4 | 0 |
 | Testing | 1 | 2 | 0 | 0 |
 
 **Recently Completed:**
+- ✅ CSS Flexbox iterative constraint resolution (grow/shrink with min/max freezing)
+- ✅ CSS Grid `repeat()` function support (count, auto-fill, auto-fit)
 - ✅ CSS Grid `minmax()` track sizing (full min/max clamping and fr distribution)
 - ✅ CSS Flexbox `flex-wrap` multi-line layout improvements (wrap-reverse fix)
 
 **Key Priorities:**
-1. Add `repeat()` function support for responsive grids
-2. Complete CSS Flexbox iterative constraint resolution
-3. Split Algorithm.lean into focused modules
-4. Replace magic numbers with named constants
-5. Implement CSS Grid named lines and areas
+1. Replace magic numbers with named constants
+2. Split Algorithm.lean into focused modules
+3. Implement CSS Grid named lines and areas
+4. Add Flexbox `order` property support
+5. Add `aspect-ratio` property support

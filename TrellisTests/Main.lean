@@ -382,6 +382,93 @@ test "flex-wrap: items are sized correctly on each line" := do
   shouldBeNear cl1.width 80 0.01
   shouldBeNear cl2.width 80 0.01
 
+/-! ## Flex Constraint Resolution Tests -/
+
+test "flex-grow: item hitting max-width redistributes to others" := do
+  -- Item 1 can grow up to 80px max, item 2 has no limit
+  -- In 300px container with both items having grow:1, naive split would be 150px each
+  -- But item 1 is capped at 80px, so remaining 220px goes to item 2
+  let node := LayoutNode.flexBox 0 (FlexContainer.row) #[
+    LayoutNode.leaf' 1 0 30 { maxWidth := some 80 } (.flexChild (FlexItem.growing 1)),
+    LayoutNode.leaf' 2 0 30 {} (.flexChild (FlexItem.growing 1))
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 1 should be capped at 80px
+  shouldBeNear cl1.width 80 0.01
+  -- Item 2 gets the rest: 300 - 80 = 220px
+  shouldBeNear cl2.width 220 0.01
+
+test "flex-grow: multiple items hitting max-width" := do
+  -- Both items have max-width of 80px, third item gets remaining space
+  -- Container 300px, all grow:1, naive split 100px each
+  -- Items 1 and 2 cap at 80, item 3 gets 300 - 80 - 80 = 140px
+  let node := LayoutNode.flexBox 0 (FlexContainer.row) #[
+    LayoutNode.leaf' 1 0 30 { maxWidth := some 80 } (.flexChild (FlexItem.growing 1)),
+    LayoutNode.leaf' 2 0 30 { maxWidth := some 80 } (.flexChild (FlexItem.growing 1)),
+    LayoutNode.leaf' 3 0 30 {} (.flexChild (FlexItem.growing 1))
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  shouldBeNear cl1.width 80 0.01
+  shouldBeNear cl2.width 80 0.01
+  shouldBeNear cl3.width 140 0.01
+
+test "flex-shrink: item hitting min-width redistributes to others" := do
+  -- Items with flex-basis 100px each in a 100px container need to shrink
+  -- Item 1 has min-width 80px, item 2 has no limit
+  -- Total basis 200px, need to shrink 100px
+  -- Naive split with shrink:1 would shrink each by 50px to 50px
+  -- But item 1 can only shrink to 80px (20px shrink), so item 2 shrinks 80px to 20px
+  let node := LayoutNode.flexBox 0 (FlexContainer.row) #[
+    LayoutNode.leaf' 1 100 30 { minWidth := 80 } (.flexChild { shrink := 1, basis := .length 100 }),
+    LayoutNode.leaf' 2 100 30 {} (.flexChild { shrink := 1, basis := .length 100 })
+  ]
+  let result := layout node 100 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 1 capped at min 80px
+  shouldBeNear cl1.width 80 0.01
+  -- Item 2 gets the rest: 100 - 80 = 20px
+  shouldBeNear cl2.width 20 0.01
+
+test "flex-shrink: multiple items hitting min-width" := do
+  -- Three items with flex-basis 100px each in a 120px container
+  -- Items 1 and 2 have min-width 50px, item 3 has no limit
+  -- Total basis 300px, need to shrink 180px total
+  let node := LayoutNode.flexBox 0 (FlexContainer.row) #[
+    LayoutNode.leaf' 1 100 30 { minWidth := 50 } (.flexChild { shrink := 1, basis := .length 100 }),
+    LayoutNode.leaf' 2 100 30 { minWidth := 50 } (.flexChild { shrink := 1, basis := .length 100 }),
+    LayoutNode.leaf' 3 100 30 {} (.flexChild { shrink := 1, basis := .length 100 })
+  ]
+  let result := layout node 120 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Items 1 and 2 capped at min 50px
+  shouldBeNear cl1.width 50 0.01
+  shouldBeNear cl2.width 50 0.01
+  -- Item 3 gets the rest: 120 - 50 - 50 = 20px
+  shouldBeNear cl3.width 20 0.01
+
+test "flex-grow: different grow factors with max-width constraint" := do
+  -- Item 1: grow 2, max 120px; Item 2: grow 1, no max
+  -- Container 300px, total grow 3
+  -- Naive: Item 1 gets 200px (capped to 120), Item 2 gets 100px
+  -- After cap: Item 2 gets remaining 300 - 120 = 180px
+  let node := LayoutNode.flexBox 0 (FlexContainer.row) #[
+    LayoutNode.leaf' 1 0 30 { maxWidth := some 120 } (.flexChild (FlexItem.growing 2)),
+    LayoutNode.leaf' 2 0 30 {} (.flexChild (FlexItem.growing 1))
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  shouldBeNear cl1.width 120 0.01
+  shouldBeNear cl2.width 180 0.01
+
 /-! ## Grid Basic Tests -/
 
 test "grid with 3 equal fr columns" := do
@@ -700,6 +787,143 @@ test "grid mixed fixed and minmax columns" := do
   shouldBeNear cl1.width 50 0.01
   shouldBeNear cl2.width 80 0.01
   shouldBeNear cl3.width 170 0.01  -- 300 - 50 - 80
+
+/-! ## Grid repeat() Function Tests -/
+
+test "grid repeat(3, 1fr) creates 3 equal columns" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.repeatCount 3 #[.fr 1]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩,
+    LayoutNode.leaf 3 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Each column should be 100px (300 / 3)
+  shouldBeNear cl1.width 100 0.01
+  shouldBeNear cl2.width 100 0.01
+  shouldBeNear cl3.width 100 0.01
+
+test "grid repeat(2, 50px 100px) creates alternating columns" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.repeatCount 2 #[.px 50, .px 100]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩,
+    LayoutNode.leaf 3 ⟨0, 30⟩,
+    LayoutNode.leaf 4 ⟨0, 30⟩
+  ]
+  let result := layout node 400 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  let cl4 := result.get! 4
+  -- Pattern: 50, 100, 50, 100
+  shouldBeNear cl1.width 50 0.01
+  shouldBeNear cl2.width 100 0.01
+  shouldBeNear cl3.width 50 0.01
+  shouldBeNear cl4.width 100 0.01
+
+test "grid repeat(auto-fill, 100px) fills container with columns" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.autoFill #[.px 100]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩,
+    LayoutNode.leaf 3 ⟨0, 30⟩
+  ]
+  -- 350px container should fit 3 columns of 100px each
+  let result := layout node 350 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- All items should be on the first row (same y)
+  shouldBeNear cl1.y cl2.y 0.01
+  shouldBeNear cl2.y cl3.y 0.01
+  -- Each column 100px wide
+  shouldBeNear cl1.width 100 0.01
+
+test "grid repeat(auto-fill, minmax(100px, 1fr)) creates responsive columns" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.autoFill #[.minmax (.px 100) (.fr 1)]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  -- 250px container: 2 columns of 100px min each, remaining space distributed
+  let result := layout node 250 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Both on same row
+  shouldBeNear cl1.y cl2.y 0.01
+  -- Each column should be 125px (250 / 2)
+  shouldBeNear cl1.width 125 0.01
+  shouldBeNear cl2.width 125 0.01
+
+test "grid repeat with gap accounts for gaps in auto-fill" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.autoFill #[.px 100]
+    columnGap := 20
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  -- 220px container with 20px gap: 2 columns of 100px each (100 + 20 + 100 = 220)
+  let result := layout node 220 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  shouldBeNear cl1.width 100 0.01
+  shouldBeNear cl2.width 100 0.01
+  -- Second column starts at 120 (100 + 20 gap)
+  shouldBeNear cl2.x 120 0.01
+
+test "grid repeat(auto-fit, 100px) behaves like auto-fill" := do
+  -- Note: Full auto-fit behavior (collapsing empty tracks) is complex
+  -- For now, auto-fit creates the same number of tracks as auto-fill
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.autoFit #[.px 100]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Both items should have 100px width
+  shouldBeNear cl1.width 100 0.01
+  shouldBeNear cl2.width 100 0.01
+
+test "grid repeat on rows creates multiple rows" := do
+  let props := { GridContainer.default with
+    templateColumns := GridTemplate.fromSizes #[.fr 1]
+    templateRows := GridTemplate.repeatCount 3 #[.px 50]
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 0⟩,
+    LayoutNode.leaf 2 ⟨0, 0⟩,
+    LayoutNode.leaf 3 ⟨0, 0⟩
+  ]
+  let result := layout node 200 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Each row should be 50px tall
+  shouldBeNear cl1.height 50 0.01
+  shouldBeNear cl2.height 50 0.01
+  shouldBeNear cl3.height 50 0.01
+  -- Items stacked vertically
+  shouldBeNear cl1.y 0 0.01
+  shouldBeNear cl2.y 50 0.01
+  shouldBeNear cl3.y 100 0.01
 
 #generate_tests
 
