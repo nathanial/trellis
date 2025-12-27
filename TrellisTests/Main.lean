@@ -613,6 +613,94 @@ test "grid creates implicit rows for overflow items" := do
   shouldSatisfy (cl3.y > 0) "item 3 should be on row 2"
   shouldBeNear cl3.y cl4.y 0.01
 
+/-! ## Grid minmax() Track Sizing Tests -/
+
+test "grid minmax(px, px) clamps column width between min and max" := do
+  -- minmax(50, 150) should clamp content-based sizing
+  let props := GridContainer.withColumns #[.minmax (.px 50) (.px 150), .fr 1]
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨200, 30⟩,  -- Content wants 200px but max is 150
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- First column should be clamped to 150 (max), second gets remaining 150
+  shouldBeNear cl1.width 150 0.01
+  shouldBeNear cl2.width 150 0.01
+
+test "grid minmax(px, px) respects minimum when content is smaller" := do
+  -- minmax(100, 200) with small content should use min of 100
+  let props := GridContainer.withColumns #[.minmax (.px 100) (.px 200), .fr 1]
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨20, 30⟩,  -- Content wants only 20px but min is 100
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- First column should be at least 100 (min), second gets remaining 200
+  shouldBeNear cl1.width 100 0.01
+  shouldBeNear cl2.width 200 0.01
+
+test "grid minmax(px, fr) uses min as base and grows with fr" := do
+  -- minmax(50, 1fr) should start at 50 and grow with remaining space
+  let props := GridContainer.withColumns #[.minmax (.px 50) (.fr 1), .minmax (.px 50) (.fr 1)]
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Both columns should split remaining space equally: 300/2 = 150 each
+  shouldBeNear cl1.width 150 0.01
+  shouldBeNear cl2.width 150 0.01
+
+test "grid minmax(px, fr) with unequal fr values" := do
+  -- minmax(0, 1fr) vs minmax(0, 2fr) should distribute 1:2
+  let props := GridContainer.withColumns #[.minmax (.px 0) (.fr 1), .minmax (.px 0) (.fr 2)]
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- 1:2 ratio, so 100 and 200
+  shouldBeNear cl1.width 100 0.01
+  shouldBeNear cl2.width 200 0.01
+
+test "grid minmax with row sizing" := do
+  -- Test minmax on rows
+  let props := GridContainer.withTemplate
+    #[.minmax (.px 50) (.px 100)]  -- Row with minmax
+    #[.fr 1]                        -- Single column
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨50, 30⟩   -- Content height 30 < min 50
+  ]
+  let result := layout node 200 200
+  let cl := result.get! 1
+  -- Row should be at least 50 (min)
+  shouldSatisfy (cl.height >= 50) "row height should be at least minmax min"
+
+test "grid mixed fixed and minmax columns" := do
+  -- Fixed 50px + minmax(50, 100) + fr
+  let props := GridContainer.withColumns #[.px 50, .minmax (.px 50) (.px 100), .fr 1]
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 ⟨0, 30⟩,
+    LayoutNode.leaf 2 ⟨80, 30⟩,  -- Content 80 within minmax range
+    LayoutNode.leaf 3 ⟨0, 30⟩
+  ]
+  let result := layout node 300 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- First: fixed 50, Second: content 80 clamped to [50,100], Third: remaining
+  shouldBeNear cl1.width 50 0.01
+  shouldBeNear cl2.width 80 0.01
+  shouldBeNear cl3.width 170 0.01  -- 300 - 50 - 80
+
 #generate_tests
 
 end TrellisTests

@@ -20,18 +20,19 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ---
 
-### [Priority: High] CSS Grid `minmax()` Track Sizing
-**Description:** While `TrackSize.minmax` exists in the type definition, the resolution logic in `sizeTracksToContent` only partially handles it. Full implementation should clamp track sizes between minimum and maximum values during both intrinsic sizing and fr-unit distribution phases.
+### [COMPLETED] CSS Grid `minmax()` Track Sizing
+**Status:** ✅ Implemented
 
-**Rationale:** `minmax()` is one of the most commonly used CSS Grid features for responsive layouts.
+**What was done:**
+- Added `minSize` and `maxSize` fields to `ResolvedTrack` structure
+- Updated `initTracks` to extract fr values from minmax and resolve min/max constraints
+- Updated `sizeTracksToContent` to properly size minmax tracks (base at min, grow to content up to max)
+- Updated `resolveFrTracks` to handle minmax(min, fr) tracks in fr distribution
+- Added 6 comprehensive tests for minmax() behavior
 
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (lines 521-527, 549-559)
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Grid.lean` (lines 11-16)
-
-**Estimated Effort:** Medium
-
-**Dependencies:** None
+**Files Changed:**
+- `Trellis/Algorithm.lean` - Core minmax logic in track sizing
+- `TrellisTests/Main.lean` - Added minmax test suite
 
 ---
 
@@ -496,17 +497,18 @@ layout do
 
 | Category | High | Medium | Low | Completed |
 |----------|------|--------|-----|-----------|
-| Features | 2 | 5 | 3 | 1 |
+| Features | 1 | 5 | 3 | 2 |
 | Improvements | 2 | 5 | 3 | 0 |
 | Cleanup | 2 | 3 | 4 | 0 |
 | Testing | 1 | 2 | 0 | 0 |
 
 **Recently Completed:**
+- ✅ CSS Grid `minmax()` track sizing (full min/max clamping and fr distribution)
 - ✅ CSS Flexbox `flex-wrap` multi-line layout improvements (wrap-reverse fix)
 
 **Key Priorities:**
-1. Implement full `minmax()` track sizing for Grid
-2. Add `repeat()` function support for responsive grids
-3. Complete CSS Flexbox iterative constraint resolution
-4. Split Algorithm.lean into focused modules
-5. Replace magic numbers with named constants
+1. Add `repeat()` function support for responsive grids
+2. Complete CSS Flexbox iterative constraint resolution
+3. Split Algorithm.lean into focused modules
+4. Replace magic numbers with named constants
+5. Implement CSS Grid named lines and areas

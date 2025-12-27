@@ -73,8 +73,12 @@ structure ResolvedTrack where
   size : TrackSize
   /-- Base size (from content or fixed). -/
   baseSize : Length := 0
-  /-- Fr factor if flexible. -/
+  /-- Fr factor if flexible (from fr or minmax with fr max). -/
   frValue : Float := 0
+  /-- Minimum size constraint (from minmax). -/
+  minSize : Option Length := none
+  /-- Maximum size constraint (from minmax). -/
+  maxSize : Option Length := none
   /-- Final resolved size. -/
   resolvedSize : Length := 0
   /-- Position (cumulative offset from start). -/
@@ -517,17 +521,42 @@ def resolveGridSpan (span : GridSpan) (trackCount : Nat) (defaultStart : Nat := 
     | .named _ => startIdx + 1
   (startIdx, max (startIdx + 1) endIdx)
 
+/-- Extract fr value from a TrackSize (including nested minmax). -/
+def extractFrValue : TrackSize → Float
+  | .fr n => n
+  | .minmax _ max => extractFrValue max
+  | _ => 0
+
+/-- Resolve a TrackSize to a fixed Length if possible. -/
+def resolveToLength (size : TrackSize) (available : Length) : Option Length :=
+  match size with
+  | .fixed dim => some (dim.resolve available 0)
+  | .fr _ => none  -- Fr cannot be resolved to fixed length
+  | .minmax minTrack maxTrack =>
+    -- For minmax, we can resolve if both parts resolve
+    match resolveToLength minTrack available, resolveToLength maxTrack available with
+    | some minLen, some maxLen => some (max minLen maxLen)
+    | _, _ => none
+  | .fitContent maxLen => some maxLen
+
 /-- Initialize ResolvedTrack array from a GridTemplate. -/
-def initTracks (template : GridTemplate) (minCount : Nat) : Array ResolvedTrack := Id.run do
+def initTracks (template : GridTemplate) (minCount : Nat) (available : Length := 0) : Array ResolvedTrack := Id.run do
   let explicitCount := template.tracks.size
   let count := max explicitCount minCount
   let mut tracks : Array ResolvedTrack := #[]
   for i in [:count] do
     let size := if i < explicitCount then template.tracks[i]!.size else template.autoSize
-    let frVal := match size with
-      | .fr n => n
-      | _ => 0
-    tracks := tracks.push { size, frValue := frVal }
+    -- Extract fr value (including from minmax max)
+    let frVal := extractFrValue size
+    -- Extract min/max constraints from minmax
+    let (minSize, maxSize) := match size with
+      | .minmax min maxT =>
+        let minL := resolveToLength min available
+        let maxL := resolveToLength maxT available
+        (minL, maxL)
+      | .fitContent maxLen => (none, some maxLen)
+      | _ => (none, none)
+    tracks := tracks.push { size, frValue := frVal, minSize, maxSize }
   tracks
 
 /-- Resolve the base size of a track (for fixed/auto sizes). -/
@@ -535,8 +564,8 @@ def resolveTrackBaseSize (size : TrackSize) (available : Length) : Length :=
   match size with
   | .fixed dim => dim.resolve available 0
   | .fr _ => 0  -- Fr tracks start at 0, sized in fr resolution phase
-  | .minmax min _ => resolveTrackBaseSize min available
-  | .fitContent max => min max available
+  | .minmax minTrack _ => resolveTrackBaseSize minTrack available
+  | .fitContent maxLen => min maxLen available
 
 /-- Calculate the maximum content size for items in a given track (including margins). -/
 def maxContentInTrack (items : Array GridItemState) (trackIdx : Nat) (isColumn : Bool) : Length :=
@@ -566,9 +595,20 @@ def sizeTracksToContent (tracks : Array ResolvedTrack) (items : Array GridItemSt
     let baseSize := match track.size with
       | .fixed .auto => maxContentInTrack items i isColumn
       | .fixed dim => dim.resolve available 0
-      | .fr _ => 0
-      | .minmax min _ => resolveTrackBaseSize min available
-      | .fitContent max => min (maxContentInTrack items i isColumn) max
+      | .fr _ => 0  -- Fr tracks sized in fr resolution phase
+      | .minmax minTrack maxTrack =>
+        -- Base size starts at min
+        let minSz := resolveTrackBaseSize minTrack available
+        -- If max is not fr, we can size to content up to max
+        if maxTrack.isFr then
+          minSz  -- Will be grown in fr resolution phase
+        else
+          -- Grow based on content, clamped between min and max
+          let content := maxContentInTrack items i isColumn
+          let maxSz := resolveTrackBaseSize maxTrack available
+          max minSz (min content maxSz)
+      | .fitContent maxLen =>
+        min (maxContentInTrack items i isColumn) maxLen
     result := result.set! i { track with baseSize, resolvedSize := baseSize }
   result
 
@@ -576,11 +616,11 @@ def sizeTracksToContent (tracks : Array ResolvedTrack) (items : Array GridItemSt
 def totalFrUnits (tracks : Array ResolvedTrack) : Float :=
   tracks.foldl (fun acc t => acc + t.frValue) 0
 
-/-- Distribute remaining space to fr tracks. -/
+/-- Distribute remaining space to fr tracks, respecting min/max constraints from minmax(). -/
 def resolveFrTracks (tracks : Array ResolvedTrack) (available : Length) (gap : Length) : Array ResolvedTrack := Id.run do
-  -- Calculate space used by non-fr tracks
+  -- Calculate space used by non-fr tracks (including minmax base sizes)
   let usedSpace := tracks.foldl (fun acc t =>
-    if t.frValue > 0 then acc else acc + t.resolvedSize) 0
+    if t.frValue > 0 then acc + t.baseSize else acc + t.resolvedSize) 0
   let gaps := if tracks.size > 0 then gap * (tracks.size - 1).toFloat else 0
   let remaining := max 0 (available - usedSpace - gaps)
 
@@ -593,8 +633,14 @@ def resolveFrTracks (tracks : Array ResolvedTrack) (available : Length) (gap : L
   for i in [:tracks.size] do
     let track := tracks[i]!
     if track.frValue > 0 then
+      -- Calculate raw fr size
       let frSize := spacePerFr * track.frValue
-      result := result.set! i { track with resolvedSize := frSize }
+      -- For minmax tracks, the resolved size is base + fr growth, clamped to min
+      -- For pure fr tracks, just use the fr size
+      let resolvedSize := match track.minSize with
+        | some minS => max minS (track.baseSize + frSize)
+        | none => frSize
+      result := result.set! i { track with resolvedSize }
   result
 
 /-- Calculate cumulative positions for tracks. -/
@@ -812,8 +858,8 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   let (placedItems, actualRows, actualCols) := placeAllItems items container explicitRows minCols
 
   -- Phase 3: Initialize and size tracks
-  let mut colTracks := initTracks container.templateColumns actualCols
-  let mut rowTracks := initTracks container.templateRows actualRows
+  let mut colTracks := initTracks container.templateColumns actualCols availableWidth
+  let mut rowTracks := initTracks container.templateRows actualRows availableHeight
 
   -- Size tracks to content
   colTracks := sizeTracksToContent colTracks placedItems true availableWidth
