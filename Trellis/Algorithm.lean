@@ -276,8 +276,8 @@ def partitionIntoLines (items : Array FlexItemState) (wrapMode : FlexWrap)
         crossSize := computeLineCrossSize currentItems
       }
 
-    -- Reverse lines if wrap-reverse
-    if wrapMode == .wrapReverse then lines.reverse else lines
+    -- Note: wrap-reverse cross-axis direction is handled in alignFlexLines
+    lines
 
 /-! ## Phase 4: Resolve Flexible Lengths -/
 
@@ -420,15 +420,18 @@ def computeCrossPositions (items : Array FlexItemState)
 
 /-! ## Phase 8: Align Content (multi-line) -/
 
-/-- Position flex lines along the cross axis. -/
+/-- Position flex lines along the cross axis.
+    For wrap-reverse, lines are positioned from cross-end toward cross-start. -/
 def alignFlexLines (lines : Array FlexLine) (alignContent : AlignContent)
-    (availableCross rowGap : Length) : Array FlexLine := Id.run do
+    (availableCross rowGap : Length) (isWrapReverse : Bool := false) : Array FlexLine := Id.run do
   if lines.isEmpty then return #[]
 
   let totalLineCross := lines.foldl (fun acc l => acc + l.crossSize) 0
   let totalGaps := rowGap * (lines.size - 1).toFloat
   let freeSpace := availableCross - totalLineCross - totalGaps
 
+  -- Note: wrap-reverse doesn't change the meaning of alignment keywords;
+  -- the positioning logic below handles the reversed direction directly.
   let (startOffset, lineGap) := match alignContent with
     | .flexStart | .stretch => (0.0, rowGap)
     | .flexEnd => (freeSpace, rowGap)
@@ -444,11 +447,21 @@ def alignFlexLines (lines : Array FlexLine) (alignContent : AlignContent)
         (space, space + rowGap)
 
   let mut positioned : Array FlexLine := #[]
-  let mut currentCross := startOffset
 
-  for line in lines do
-    positioned := positioned.push { line with crossPosition := currentCross }
-    currentCross := currentCross + line.crossSize + lineGap
+  if isWrapReverse then
+    -- Position from cross-end toward cross-start
+    -- First line goes at the bottom/right, subsequent lines stack upward/leftward
+    let mut currentCross := availableCross - startOffset
+    for line in lines do
+      currentCross := currentCross - line.crossSize
+      positioned := positioned.push { line with crossPosition := currentCross }
+      currentCross := currentCross - lineGap
+  else
+    -- Normal positioning from cross-start toward cross-end
+    let mut currentCross := startOffset
+    for line in lines do
+      positioned := positioned.push { line with crossPosition := currentCross }
+      currentCross := currentCross + line.crossSize + lineGap
 
   positioned
 
@@ -849,11 +862,12 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
     resolveFlexibleLengths line availableMain container.gap
 
   -- Phase 8: Align content (position lines)
+  let isWrapReverse := container.wrap == .wrapReverse
   -- For single-line containers with stretch, use full cross space
   let lines := if lines.size == 1 && container.alignContent == .stretch then
     lines.map fun line => { line with crossSize := availableCross }
   else
-    alignFlexLines lines container.alignContent availableCross container.rowGap
+    alignFlexLines lines container.alignContent availableCross container.rowGap isWrapReverse
 
   -- Phase 5: Cross axis sizing (after line sizes are finalized)
   let lines := lines.map fun line =>

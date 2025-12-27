@@ -6,17 +6,17 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ## Feature Proposals
 
-### [Priority: High] CSS Flexbox `flex-wrap` Multi-line Layout Improvements
-**Description:** The current `flex-wrap` implementation handles basic wrapping but lacks full CSS specification compliance. Items that wrap should properly recalculate line breaks when items shrink, and `wrap-reverse` should reverse the cross-axis direction of lines.
+### [COMPLETED] CSS Flexbox `flex-wrap` Multi-line Layout Improvements
+**Status:** ✅ Implemented
 
-**Rationale:** Multi-line flex layouts are common in responsive designs, and accurate wrapping behavior is essential for real-world use cases.
+**What was done:**
+- Fixed `wrap-reverse` to correctly reverse cross-axis direction (not just line order)
+- Modified `alignFlexLines` to position lines from cross-end for wrap-reverse mode
+- Added 10 comprehensive tests for multi-line flex layouts
 
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (lines 239-280, `partitionIntoLines`)
-
-**Estimated Effort:** Medium
-
-**Dependencies:** None
+**Files Changed:**
+- `Trellis/Algorithm.lean` - Fixed `partitionIntoLines` and `alignFlexLines`
+- `TrellisTests/Main.lean` - Added flex-wrap test suite
 
 ---
 
@@ -494,16 +494,19 @@ layout do
 
 ## Summary
 
-| Category | High | Medium | Low |
-|----------|------|--------|-----|
-| Features | 3 | 5 | 3 |
-| Improvements | 2 | 5 | 3 |
-| Cleanup | 2 | 3 | 4 |
-| Testing | 1 | 2 | 0 |
+| Category | High | Medium | Low | Completed |
+|----------|------|--------|-----|-----------|
+| Features | 2 | 5 | 3 | 1 |
+| Improvements | 2 | 5 | 3 | 0 |
+| Cleanup | 2 | 3 | 4 | 0 |
+| Testing | 1 | 2 | 0 | 0 |
+
+**Recently Completed:**
+- ✅ CSS Flexbox `flex-wrap` multi-line layout improvements (wrap-reverse fix)
 
 **Key Priorities:**
-1. Complete CSS Flexbox iterative constraint resolution
-2. Implement full `minmax()` track sizing for Grid
-3. Add `repeat()` function support for responsive grids
+1. Implement full `minmax()` track sizing for Grid
+2. Add `repeat()` function support for responsive grids
+3. Complete CSS Flexbox iterative constraint resolution
 4. Split Algorithm.lean into focused modules
 5. Replace magic numbers with named constants

@@ -239,6 +239,149 @@ test "zero flex-grow items keep their basis size" := do
   shouldBeNear cl1.width 50 0.01
   shouldBeNear cl2.width 250 0.01
 
+/-! ## Flex Wrap Tests -/
+
+test "flex-wrap: wrap creates multiple lines" := do
+  let props := { FlexContainer.row with wrap := .wrap }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨60, 30⟩,
+    LayoutNode.leaf 2 ⟨60, 30⟩,
+    LayoutNode.leaf 3 ⟨60, 30⟩
+  ]
+  -- Container is 100px wide, items are 60px each, so they must wrap
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Each item on its own line (stacked vertically)
+  shouldBeNear cl1.y 0 0.01
+  shouldSatisfy (cl2.y > cl1.y) "item 2 should be on a new line"
+  shouldSatisfy (cl3.y > cl2.y) "item 3 should be on a new line"
+
+test "flex-wrap: wrap-reverse positions first line at bottom" := do
+  let props := { FlexContainer.row with wrap := .wrapReverse }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨60, 30⟩,
+    LayoutNode.leaf 2 ⟨60, 30⟩
+  ]
+  -- Container is 100px wide, items are 60px each, so they wrap
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- With wrap-reverse, first line (item 1) should be at the bottom
+  -- Item 2 wraps to a line above item 1
+  shouldSatisfy (cl1.y > cl2.y) "first line should be below second line in wrap-reverse"
+
+test "flex-wrap: wrap-reverse with column direction" := do
+  let props := { FlexContainer.column with wrap := .wrapReverse }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨30, 60⟩,
+    LayoutNode.leaf 2 ⟨30, 60⟩
+  ]
+  -- Container is 100px tall, items are 60px each, so they wrap
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- With column wrap-reverse, first column should be at the right
+  shouldSatisfy (cl1.x > cl2.x) "first column should be right of second in wrap-reverse"
+
+test "flex-wrap: nowrap keeps all items on one line" := do
+  let props := { FlexContainer.row with wrap := .nowrap }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨60, 30⟩,
+    LayoutNode.leaf 2 ⟨60, 30⟩,
+    LayoutNode.leaf 3 ⟨60, 30⟩
+  ]
+  -- Container is 100px wide, items are 60px each, but nowrap forces single line
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- All items should be on the same horizontal line (same y)
+  shouldBeNear cl1.y cl2.y 0.01
+  shouldBeNear cl2.y cl3.y 0.01
+
+test "flex-wrap with row-gap spaces lines correctly" := do
+  let props := { FlexContainer.row with wrap := .wrap, rowGap := 20 }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨100, 30⟩,
+    LayoutNode.leaf 2 ⟨100, 30⟩
+  ]
+  -- Each item takes full width, so they wrap
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Second line should start after first line + rowGap
+  let expectedY2 := cl1.y + cl1.height + 20
+  shouldBeNear cl2.y expectedY2 0.01
+
+test "flex-wrap: align-content center with multiple lines" := do
+  let props := { FlexContainer.row with
+    wrap := .wrap
+    alignContent := .center
+  }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨100, 30⟩,
+    LayoutNode.leaf 2 ⟨100, 30⟩
+  ]
+  -- Each item takes full width (100px), container is 100px, so they wrap
+  -- Total content height = 60, container = 200, free space = 140
+  -- Center offset should be 70
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  shouldBeNear cl1.y 70 0.01
+
+test "flex-wrap: align-content space-between with multiple lines" := do
+  let props := { FlexContainer.row with
+    wrap := .wrap
+    alignContent := .spaceBetween
+  }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨100, 30⟩,
+    LayoutNode.leaf 2 ⟨100, 30⟩
+  ]
+  -- Each item takes full width, forcing wrap
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- First line at top, second line at bottom
+  shouldBeNear cl1.y 0 0.01
+  shouldBeNear (cl2.y + cl2.height) 200 0.01
+
+test "flex-wrap: single line with wrap-reverse positions correctly" := do
+  -- Use flexStart alignContent so line positioning matters
+  -- With wrap-reverse, flexStart maps to cross-end (bottom)
+  let props := { FlexContainer.row with
+    wrap := .wrapReverse
+    alignContent := .flexStart
+  }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨30, 30⟩,
+    LayoutNode.leaf 2 ⟨30, 30⟩
+  ]
+  -- Items fit on one line (60px < 100px)
+  let result := layout node 100 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Single line should be at the cross-end (bottom) because wrap-reverse
+  -- flips flexStart to mean cross-end
+  shouldSatisfy (cl1.y > 0) "single wrap-reverse line should be at bottom"
+  shouldBeNear cl1.y cl2.y 0.01
+
+test "flex-wrap: items are sized correctly on each line" := do
+  let props := { FlexContainer.row with wrap := .wrap }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 ⟨80, 30⟩,
+    LayoutNode.leaf 2 ⟨80, 30⟩
+  ]
+  -- Container 100px, items 80px each, so they wrap
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Each item should maintain its width
+  shouldBeNear cl1.width 80 0.01
+  shouldBeNear cl2.width 80 0.01
+
 /-! ## Grid Basic Tests -/
 
 test "grid with 3 equal fr columns" := do
