@@ -202,9 +202,9 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
     -- Get constraints
     let box := child.box
     let minMain := axis.mainMin box
-    let maxMain := (axis.mainMax box).getD 1000000.0  -- Large value for "unbounded"
+    let maxMain := (axis.mainMax box).getD Length.unbounded
     let minCross := axis.crossMin box
-    let maxCross := (axis.crossMax box).getD 1000000.0
+    let maxCross := (axis.crossMax box).getD Length.unbounded
 
     -- Compute hypothetical sizes (clamped to constraints)
     let hypotheticalMain := min maxMain (max minMain flexBasis)

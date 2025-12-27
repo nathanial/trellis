@@ -8,6 +8,14 @@ namespace Trellis
 /-- Length in layout units (pixels). -/
 abbrev Length := Float
 
+namespace Length
+
+/-- A large value representing an unbounded maximum constraint.
+    Used when no explicit max-width/max-height is set. -/
+def unbounded : Length := 1000000.0
+
+end Length
+
 /-- A CSS-style dimension value. -/
 inductive Dimension where
   | auto                  -- Size determined by content or context

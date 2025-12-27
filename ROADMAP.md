@@ -177,17 +177,17 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ## Code Improvements
 
-### [Priority: High] Replace Magic Number for Unbounded Max
-**Current State:** In `collectFlexItems` (Algorithm.lean line 201), unbounded max constraints use a magic number `1000000.0`.
+### [COMPLETED] Replace Magic Number for Unbounded Max
+**Status:** ✅ Implemented
 
-**Proposed Change:** Define a constant `Float.infinity` or `Length.unbounded` and use it consistently throughout the codebase.
+**What was done:**
+- Added `Length.unbounded` constant in Types.lean (value: 1000000.0)
+- Replaced magic number usages in `collectFlexItems` with `Length.unbounded`
+- Clear documentation explaining the constant's purpose
 
-**Benefits:** Improved clarity, easier to audit for overflow issues, more idiomatic.
-
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (lines 201-203)
-
-**Estimated Effort:** Small
+**Files Changed:**
+- `Trellis/Types.lean` - Added `Length.unbounded` constant
+- `Trellis/Algorithm.lean` - Replaced magic numbers
 
 ---
 
@@ -504,19 +504,20 @@ layout do
 | Category | High | Medium | Low | Completed |
 |----------|------|--------|-----|-----------|
 | Features | 0 | 5 | 3 | 3 |
-| Improvements | 1 | 5 | 3 | 1 |
+| Improvements | 0 | 5 | 3 | 2 |
 | Cleanup | 2 | 3 | 4 | 0 |
 | Testing | 1 | 2 | 0 | 0 |
 
 **Recently Completed:**
+- ✅ Replace magic numbers with `Length.unbounded` constant
 - ✅ CSS Flexbox iterative constraint resolution (grow/shrink with min/max freezing)
 - ✅ CSS Grid `repeat()` function support (count, auto-fill, auto-fit)
 - ✅ CSS Grid `minmax()` track sizing (full min/max clamping and fr distribution)
 - ✅ CSS Flexbox `flex-wrap` multi-line layout improvements (wrap-reverse fix)
 
 **Key Priorities:**
-1. Replace magic numbers with named constants
-2. Split Algorithm.lean into focused modules
-3. Implement CSS Grid named lines and areas
-4. Add Flexbox `order` property support
-5. Add `aspect-ratio` property support
+1. Split Algorithm.lean into focused modules
+2. Implement CSS Grid named lines and areas
+3. Add Flexbox `order` property support
+4. Add `aspect-ratio` property support
+5. Add proper baseline alignment
