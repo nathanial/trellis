@@ -207,17 +207,19 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ---
 
-### [Priority: Medium] Separate Flexbox and Grid into Distinct Modules
-**Current State:** All layout algorithms are in a single 959-line `Algorithm.lean` file.
+### [COMPLETED] Separate Flexbox and Grid into Distinct Modules
+**Status:** ✅ Implemented
 
-**Proposed Change:** Split into `FlexAlgorithm.lean` and `GridAlgorithm.lean` with shared utilities in a `LayoutUtils.lean` module.
+**What was done:**
+- Split 1143-line Algorithm.lean into focused modules
+- `FlexAlgorithm.lean` (502 lines): All flexbox types and layout functions
+- `GridAlgorithm.lean` (575 lines): All grid types and layout functions
+- `Algorithm.lean` (97 lines): Entry point, shared utilities, recursive layout
 
-**Benefits:** Better separation of concerns, easier navigation, more focused testing.
-
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean` (split into multiple files)
-
-**Estimated Effort:** Medium
+**Files Changed:**
+- `Trellis/Algorithm.lean` - Simplified to entry point
+- `Trellis/FlexAlgorithm.lean` - New file with flexbox logic
+- `Trellis/GridAlgorithm.lean` - New file with grid logic
 
 ---
 
@@ -265,21 +267,24 @@ This document outlines feature proposals, code improvements, and cleanup tasks f
 
 ---
 
-### [Priority: Medium] Add Proper Baseline Alignment
-**Current State:** Baseline alignment for both `AlignItems.baseline` and grid alignment is simplified as `flexStart` with comments indicating this (Flex.lean line 52, Algorithm.lean lines 415-416, 637, 644).
+### [COMPLETED] Proper Baseline Alignment
+**Status:** ✅ Implemented
 
-**Proposed Change:** Implement proper baseline calculation based on first text baseline of items.
+**What was done:**
+- Added `baseline` field to `ContentSize` structure with helpers `withBaseline` and `getBaseline`
+- Added `baseline` field to `FlexItemState` and `FlexLine.maxBaseline` for flex layout
+- Added `baseline` field to `GridItemState` for grid layout
+- Implemented `computeLineMaxBaseline` and `computeLineCrossSizeWithBaseline` helpers
+- Updated `computeCrossPositions` to position flex items by baseline alignment
+- Added `computeRowBaselines` for grid row baseline calculation
+- Updated `alignInCell` to handle baseline alignment with row baselines
+- Added 6 comprehensive tests for baseline alignment (flex and grid)
 
-**Benefits:** Correct text alignment across flex items with different font sizes.
-
-**Affected Files:**
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Flex.lean`
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Algorithm.lean`
-- `/Users/Shared/Projects/lean-workspace/trellis/Trellis/Node.lean` (add baseline info to `ContentSize`)
-
-**Estimated Effort:** Medium
-
-**Dependencies:** Requires text measurement integration
+**Files Changed:**
+- `Trellis/Node.lean` - Added baseline to ContentSize
+- `Trellis/FlexAlgorithm.lean` - Added baseline tracking and alignment
+- `Trellis/GridAlgorithm.lean` - Added baseline tracking and alignment
+- `TrellisTests/Main.lean` - Added baseline alignment test suite
 
 ---
 
@@ -504,11 +509,13 @@ layout do
 | Category | High | Medium | Low | Completed |
 |----------|------|--------|-----|-----------|
 | Features | 0 | 5 | 3 | 3 |
-| Improvements | 0 | 5 | 3 | 2 |
+| Improvements | 0 | 3 | 3 | 4 |
 | Cleanup | 2 | 3 | 4 | 0 |
 | Testing | 1 | 2 | 0 | 0 |
 
 **Recently Completed:**
+- ✅ Proper baseline alignment for flex and grid layouts
+- ✅ Split Algorithm.lean into FlexAlgorithm.lean and GridAlgorithm.lean
 - ✅ Replace magic numbers with `Length.unbounded` constant
 - ✅ CSS Flexbox iterative constraint resolution (grow/shrink with min/max freezing)
 - ✅ CSS Grid `repeat()` function support (count, auto-fill, auto-fit)
@@ -516,8 +523,7 @@ layout do
 - ✅ CSS Flexbox `flex-wrap` multi-line layout improvements (wrap-reverse fix)
 
 **Key Priorities:**
-1. Split Algorithm.lean into focused modules
-2. Implement CSS Grid named lines and areas
-3. Add Flexbox `order` property support
-4. Add `aspect-ratio` property support
-5. Add proper baseline alignment
+1. Implement CSS Grid named lines and areas
+2. Add Flexbox `order` property support
+3. Add `aspect-ratio` property support
+4. Use StateM monad for mutable layout state

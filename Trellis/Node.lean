@@ -64,13 +64,22 @@ end ItemKind
 structure ContentSize where
   width : Length
   height : Length
+  /-- Distance from top to first text baseline. If not specified, defaults to height. -/
+  baseline : Option Length := none
 deriving Repr, BEq, Inhabited
 
 namespace ContentSize
 
-def zero : ContentSize := ⟨0, 0⟩
+def zero : ContentSize := ⟨0, 0, none⟩
 
-def mk' (w h : Length) : ContentSize := ⟨w, h⟩
+def mk' (w h : Length) : ContentSize := ⟨w, h, none⟩
+
+/-- Create content size with explicit baseline. -/
+def withBaseline (w h baseline : Length) : ContentSize := ⟨w, h, some baseline⟩
+
+/-- Get the baseline, defaulting to height if not specified. -/
+def getBaseline (cs : ContentSize) : Length :=
+  cs.baseline.getD cs.height
 
 end ContentSize
 
@@ -150,7 +159,7 @@ def leaf (id : Nat) (content : ContentSize)
 def leaf' (id : Nat) (width height : Length)
     (box : BoxConstraints := {})
     (item : ItemKind := .none) : LayoutNode :=
-  leaf id ⟨width, height⟩ box item
+  leaf id (ContentSize.mk' width height) box item
 
 /-- Create a flex container node. -/
 def flexBox (id : Nat) (props : FlexContainer)

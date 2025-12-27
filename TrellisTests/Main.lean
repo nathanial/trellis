@@ -15,14 +15,14 @@ testSuite "Trellis Layout Tests"
 /-! ## Basic Layout Tests -/
 
 test "single leaf node takes available space" := do
-  let node := LayoutNode.leaf 1 ⟨100, 50⟩
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 100 50)
   let result := layout node 400 300
   let cl := result.get! 1
   shouldBeNear cl.width 100 0.01
   shouldBeNear cl.height 50 0.01
 
 test "leaf respects fixed width/height constraints" := do
-  let node := LayoutNode.leaf 1 ⟨100, 50⟩
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 100 50)
     (BoxConstraints.fixed 200 100)
   let result := layout node 400 300
   let cl := result.get! 1
@@ -33,9 +33,9 @@ test "leaf respects fixed width/height constraints" := do
 
 test "flex row places items horizontally" := do
   let node := LayoutNode.row 0 #[
-    LayoutNode.leaf 1 ⟨50, 30⟩,
-    LayoutNode.leaf 2 ⟨60, 30⟩,
-    LayoutNode.leaf 3 ⟨70, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 70 30)
   ]
   let result := layout node 400 100
   let cl1 := result.get! 1
@@ -51,8 +51,8 @@ test "flex row places items horizontally" := do
 
 test "flex row respects gap" := do
   let node := LayoutNode.row 0 #[
-    LayoutNode.leaf 1 ⟨50, 30⟩,
-    LayoutNode.leaf 2 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30)
   ] (gap := 20)
   let result := layout node 400 100
   let cl1 := result.get! 1
@@ -101,9 +101,9 @@ test "flex-grow distributes remaining space after basis" := do
 
 test "flex column places items vertically" := do
   let node := LayoutNode.column 0 #[
-    LayoutNode.leaf 1 ⟨100, 40⟩,
-    LayoutNode.leaf 2 ⟨100, 50⟩,
-    LayoutNode.leaf 3 ⟨100, 60⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 40),
+    LayoutNode.leaf 2 (ContentSize.mk' 100 50),
+    LayoutNode.leaf 3 (ContentSize.mk' 100 60)
   ]
   let result := layout node 200 400
   let cl1 := result.get! 1
@@ -122,7 +122,7 @@ test "flex column places items vertically" := do
 test "justify-content: center centers items" := do
   let props := { FlexContainer.row with justifyContent := .center }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30)
   ]
   let result := layout node 400 100
   let cl := result.get! 1
@@ -132,7 +132,7 @@ test "justify-content: center centers items" := do
 test "justify-content: flex-end aligns to end" := do
   let props := { FlexContainer.row with justifyContent := .flexEnd }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30)
   ]
   let result := layout node 400 100
   let cl := result.get! 1
@@ -142,9 +142,9 @@ test "justify-content: flex-end aligns to end" := do
 test "justify-content: space-between distributes space between items" := do
   let props := { FlexContainer.row with justifyContent := .spaceBetween }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩,
-    LayoutNode.leaf 2 ⟨50, 30⟩,
-    LayoutNode.leaf 3 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 50 30)
   ]
   let result := layout node 400 100
   let cl1 := result.get! 1
@@ -162,7 +162,7 @@ test "justify-content: space-between distributes space between items" := do
 test "align-items: center centers items on cross axis" := do
   let props := { FlexContainer.row with alignItems := .center }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -172,7 +172,7 @@ test "align-items: center centers items on cross axis" := do
 test "align-items: flex-end aligns items to cross end" := do
   let props := { FlexContainer.row with alignItems := .flexEnd }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -182,7 +182,7 @@ test "align-items: flex-end aligns items to cross end" := do
 test "align-items: stretch makes items fill cross axis" := do
   let props := { FlexContainer.row with alignItems := .stretch }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -194,11 +194,11 @@ test "align-items: stretch makes items fill cross axis" := do
 
 test "nested flex containers layout correctly" := do
   let inner := LayoutNode.column 10 #[
-    LayoutNode.leaf 11 ⟨40, 20⟩,
-    LayoutNode.leaf 12 ⟨40, 20⟩
+    LayoutNode.leaf 11 (ContentSize.mk' 40 20),
+    LayoutNode.leaf 12 (ContentSize.mk' 40 20)
   ]
   let outer := LayoutNode.row 0 #[
-    LayoutNode.leaf 1 ⟨50, 50⟩,
+    LayoutNode.leaf 1 (ContentSize.mk' 50 50),
     inner.withItem (.flexChild (FlexItem.growing 1))
   ]
   let result := layout outer 200 100
@@ -221,7 +221,7 @@ test "empty container produces no child layouts" := do
 test "space-between with single item places at start" := do
   let props := { FlexContainer.row with justifyContent := .spaceBetween }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30)
   ]
   let result := layout node 400 100
   let cl := result.get! 1
@@ -244,9 +244,9 @@ test "zero flex-grow items keep their basis size" := do
 test "flex-wrap: wrap creates multiple lines" := do
   let props := { FlexContainer.row with wrap := .wrap }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨60, 30⟩,
-    LayoutNode.leaf 2 ⟨60, 30⟩,
-    LayoutNode.leaf 3 ⟨60, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 60 30)
   ]
   -- Container is 100px wide, items are 60px each, so they must wrap
   let result := layout node 100 200
@@ -261,8 +261,8 @@ test "flex-wrap: wrap creates multiple lines" := do
 test "flex-wrap: wrap-reverse positions first line at bottom" := do
   let props := { FlexContainer.row with wrap := .wrapReverse }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨60, 30⟩,
-    LayoutNode.leaf 2 ⟨60, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30)
   ]
   -- Container is 100px wide, items are 60px each, so they wrap
   let result := layout node 100 200
@@ -275,8 +275,8 @@ test "flex-wrap: wrap-reverse positions first line at bottom" := do
 test "flex-wrap: wrap-reverse with column direction" := do
   let props := { FlexContainer.column with wrap := .wrapReverse }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨30, 60⟩,
-    LayoutNode.leaf 2 ⟨30, 60⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 30 60),
+    LayoutNode.leaf 2 (ContentSize.mk' 30 60)
   ]
   -- Container is 100px tall, items are 60px each, so they wrap
   let result := layout node 200 100
@@ -288,9 +288,9 @@ test "flex-wrap: wrap-reverse with column direction" := do
 test "flex-wrap: nowrap keeps all items on one line" := do
   let props := { FlexContainer.row with wrap := .nowrap }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨60, 30⟩,
-    LayoutNode.leaf 2 ⟨60, 30⟩,
-    LayoutNode.leaf 3 ⟨60, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 60 30)
   ]
   -- Container is 100px wide, items are 60px each, but nowrap forces single line
   let result := layout node 100 200
@@ -304,8 +304,8 @@ test "flex-wrap: nowrap keeps all items on one line" := do
 test "flex-wrap with row-gap spaces lines correctly" := do
   let props := { FlexContainer.row with wrap := .wrap, rowGap := 20 }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩,
-    LayoutNode.leaf 2 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 100 30)
   ]
   -- Each item takes full width, so they wrap
   let result := layout node 100 200
@@ -321,8 +321,8 @@ test "flex-wrap: align-content center with multiple lines" := do
     alignContent := .center
   }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩,
-    LayoutNode.leaf 2 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 100 30)
   ]
   -- Each item takes full width (100px), container is 100px, so they wrap
   -- Total content height = 60, container = 200, free space = 140
@@ -337,8 +337,8 @@ test "flex-wrap: align-content space-between with multiple lines" := do
     alignContent := .spaceBetween
   }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨100, 30⟩,
-    LayoutNode.leaf 2 ⟨100, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 100 30)
   ]
   -- Each item takes full width, forcing wrap
   let result := layout node 100 200
@@ -356,8 +356,8 @@ test "flex-wrap: single line with wrap-reverse positions correctly" := do
     alignContent := .flexStart
   }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨30, 30⟩,
-    LayoutNode.leaf 2 ⟨30, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 30 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 30 30)
   ]
   -- Items fit on one line (60px < 100px)
   let result := layout node 100 100
@@ -371,8 +371,8 @@ test "flex-wrap: single line with wrap-reverse positions correctly" := do
 test "flex-wrap: items are sized correctly on each line" := do
   let props := { FlexContainer.row with wrap := .wrap }
   let node := LayoutNode.flexBox 0 props #[
-    LayoutNode.leaf 1 ⟨80, 30⟩,
-    LayoutNode.leaf 2 ⟨80, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 80 30)
   ]
   -- Container 100px, items 80px each, so they wrap
   let result := layout node 100 200
@@ -474,9 +474,9 @@ test "flex-grow: different grow factors with max-width constraint" := do
 test "grid with 3 equal fr columns" := do
   let props := GridContainer.columns 3
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -494,9 +494,9 @@ test "grid with 3 equal fr columns" := do
 test "grid with mixed track sizes (fixed + fr)" := do
   let props := GridContainer.withColumns #[.px 50, .fr 1, .fr 2]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
   ]
   let result := layout node 350 100
   let cl1 := result.get! 1
@@ -511,10 +511,10 @@ test "grid with mixed track sizes (fixed + fr)" := do
 test "grid respects column and row gaps" := do
   let props := GridContainer.columns 2 (gap := 20)
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩,
-    LayoutNode.leaf 4 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 30)
   ]
   let result := layout node 220 100
   let cl1 := result.get! 1
@@ -533,11 +533,11 @@ test "grid respects column and row gaps" := do
 test "grid auto-places items in row-major order" := do
   let props := GridContainer.columns 3
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩,
-    LayoutNode.leaf 4 ⟨0, 30⟩,
-    LayoutNode.leaf 5 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 5 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 200
   let cl1 := result.get! 1
@@ -579,7 +579,7 @@ test "grid item spanning multiple columns" := do
   }
   let node := LayoutNode.gridBox 0 props #[
     LayoutNode.leaf' 1 0 30 {} (.gridChild spanItem),  -- spans 2 cols
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -597,8 +597,8 @@ test "grid item spanning multiple rows" := do
   }
   let node := LayoutNode.gridBox 0 props #[
     LayoutNode.leaf' 1 0 0 {} (.gridChild spanItem),  -- spans 2 rows
-    LayoutNode.leaf 2 ⟨0, 50⟩,
-    LayoutNode.leaf 3 ⟨0, 50⟩
+    LayoutNode.leaf 2 (ContentSize.mk' 0 50),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 50)
   ]
   let result := layout node 200 200
   let cl1 := result.get! 1
@@ -616,7 +616,7 @@ test "grid item spanning multiple rows" := do
 test "grid justify-items: center centers items horizontally in cells" := do
   let props := { GridContainer.columns 1 with justifyItems := .center }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -628,7 +628,7 @@ test "grid align-items: center centers items vertically in cells" := do
   -- Need explicit row template with fr to make row fill available space
   let props := { GridContainer.withTemplate #[.fr 1] #[.fr 1] with alignItems := .center }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -643,7 +643,7 @@ test "grid stretch makes items fill cells" := do
     alignItems := .stretch
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨30, 20⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 30 20)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -676,7 +676,7 @@ test "single item grid fills available space with fr rows" := do
   -- Need explicit row template with fr to make row fill available space
   let props := GridContainer.withTemplate #[.fr 1] #[.fr 1]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)
   ]
   let result := layout node 200 100
   let cl := result.get! 1
@@ -688,10 +688,10 @@ test "grid creates implicit rows for overflow items" := do
   -- Only 1 explicit row, but 4 items in 2 columns
   let props := GridContainer.withTemplate #[.fr 1] #[.fr 1, .fr 1]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 50⟩,
-    LayoutNode.leaf 2 ⟨0, 50⟩,
-    LayoutNode.leaf 3 ⟨0, 50⟩,
-    LayoutNode.leaf 4 ⟨0, 50⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 50),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 50),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 50),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 50)
   ]
   let result := layout node 200 200
   let cl3 := result.get! 3
@@ -706,8 +706,8 @@ test "grid minmax(px, px) clamps column width between min and max" := do
   -- minmax(50, 150) should clamp content-based sizing
   let props := GridContainer.withColumns #[.minmax (.px 50) (.px 150), .fr 1]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨200, 30⟩,  -- Content wants 200px but max is 150
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 200 30),  -- Content wants 200px but max is 150
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -720,8 +720,8 @@ test "grid minmax(px, px) respects minimum when content is smaller" := do
   -- minmax(100, 200) with small content should use min of 100
   let props := GridContainer.withColumns #[.minmax (.px 100) (.px 200), .fr 1]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨20, 30⟩,  -- Content wants only 20px but min is 100
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 20 30),  -- Content wants only 20px but min is 100
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -734,8 +734,8 @@ test "grid minmax(px, fr) uses min as base and grows with fr" := do
   -- minmax(50, 1fr) should start at 50 and grow with remaining space
   let props := GridContainer.withColumns #[.minmax (.px 50) (.fr 1), .minmax (.px 50) (.fr 1)]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -748,8 +748,8 @@ test "grid minmax(px, fr) with unequal fr values" := do
   -- minmax(0, 1fr) vs minmax(0, 2fr) should distribute 1:2
   let props := GridContainer.withColumns #[.minmax (.px 0) (.fr 1), .minmax (.px 0) (.fr 2)]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -764,7 +764,7 @@ test "grid minmax with row sizing" := do
     #[.minmax (.px 50) (.px 100)]  -- Row with minmax
     #[.fr 1]                        -- Single column
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨50, 30⟩   -- Content height 30 < min 50
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30)   -- Content height 30 < min 50
   ]
   let result := layout node 200 200
   let cl := result.get! 1
@@ -775,9 +775,9 @@ test "grid mixed fixed and minmax columns" := do
   -- Fixed 50px + minmax(50, 100) + fr
   let props := GridContainer.withColumns #[.px 50, .minmax (.px 50) (.px 100), .fr 1]
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨80, 30⟩,  -- Content 80 within minmax range
-    LayoutNode.leaf 3 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 80 30),  -- Content 80 within minmax range
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -795,9 +795,9 @@ test "grid repeat(3, 1fr) creates 3 equal columns" := do
     templateColumns := GridTemplate.repeatCount 3 #[.fr 1]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -813,10 +813,10 @@ test "grid repeat(2, 50px 100px) creates alternating columns" := do
     templateColumns := GridTemplate.repeatCount 2 #[.px 50, .px 100]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩,
-    LayoutNode.leaf 4 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 30)
   ]
   let result := layout node 400 100
   let cl1 := result.get! 1
@@ -834,9 +834,9 @@ test "grid repeat(auto-fill, 100px) fills container with columns" := do
     templateColumns := GridTemplate.autoFill #[.px 100]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩,
-    LayoutNode.leaf 3 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
   ]
   -- 350px container should fit 3 columns of 100px each
   let result := layout node 350 100
@@ -854,8 +854,8 @@ test "grid repeat(auto-fill, minmax(100px, 1fr)) creates responsive columns" := 
     templateColumns := GridTemplate.autoFill #[.minmax (.px 100) (.fr 1)]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   -- 250px container: 2 columns of 100px min each, remaining space distributed
   let result := layout node 250 100
@@ -873,8 +873,8 @@ test "grid repeat with gap accounts for gaps in auto-fill" := do
     columnGap := 20
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   -- 220px container with 20px gap: 2 columns of 100px each (100 + 20 + 100 = 220)
   let result := layout node 220 100
@@ -892,8 +892,8 @@ test "grid repeat(auto-fit, 100px) behaves like auto-fill" := do
     templateColumns := GridTemplate.autoFit #[.px 100]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 30⟩,
-    LayoutNode.leaf 2 ⟨0, 30⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30)
   ]
   let result := layout node 300 100
   let cl1 := result.get! 1
@@ -908,9 +908,9 @@ test "grid repeat on rows creates multiple rows" := do
     templateRows := GridTemplate.repeatCount 3 #[.px 50]
   }
   let node := LayoutNode.gridBox 0 props #[
-    LayoutNode.leaf 1 ⟨0, 0⟩,
-    LayoutNode.leaf 2 ⟨0, 0⟩,
-    LayoutNode.leaf 3 ⟨0, 0⟩
+    LayoutNode.leaf 1 (ContentSize.mk' 0 0),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 0),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 0)
   ]
   let result := layout node 200 200
   let cl1 := result.get! 1
@@ -924,6 +924,107 @@ test "grid repeat on rows creates multiple rows" := do
   shouldBeNear cl1.y 0 0.01
   shouldBeNear cl2.y 50 0.01
   shouldBeNear cl3.y 100 0.01
+
+/-! ## Baseline Alignment Tests -/
+
+test "flex baseline: items with same baseline align" := do
+  -- Two items with different heights but same baseline
+  -- Item 1: 40px tall, baseline at 30px (10px below baseline)
+  -- Item 2: 60px tall, baseline at 30px (30px below baseline)
+  let props := { FlexContainer.row with alignItems := .baseline }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.withBaseline 50 40 30),
+    LayoutNode.leaf 2 (ContentSize.withBaseline 50 60 30)
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Both items should have same baseline position (y + baseline should be equal)
+  let baseline1 := cl1.y + 30
+  let baseline2 := cl2.y + 30
+  shouldBeNear baseline1 baseline2 0.01
+
+test "flex baseline: different baselines align at max" := do
+  -- Item 1: baseline at 20px from top
+  -- Item 2: baseline at 40px from top
+  -- The line's max baseline should be 40px, so item 1 is pushed down by 20px
+  let props := { FlexContainer.row with alignItems := .baseline }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.withBaseline 50 50 20),
+    LayoutNode.leaf 2 (ContentSize.withBaseline 50 50 40)
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 2 has larger baseline, so it starts at y=0
+  -- Item 1 is pushed down so baselines align
+  -- Item 2's baseline from container top = 0 + 40 = 40
+  -- Item 1's baseline from container top = (40-20) + 20 = 40
+  let baseline1 := cl1.y + 20
+  let baseline2 := cl2.y + 40
+  shouldBeNear baseline1 baseline2 0.01
+  shouldSatisfy (cl1.y > cl2.y) "item 1 should be pushed down"
+
+test "flex baseline: default baseline is height" := do
+  -- Items without explicit baseline default to height
+  let props := { FlexContainer.row with alignItems := .baseline }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30),  -- baseline defaults to 30
+    LayoutNode.leaf 2 (ContentSize.mk' 50 50)   -- baseline defaults to 50
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 2 has larger baseline (50), so baselines align there
+  let baseline1 := cl1.y + 30
+  let baseline2 := cl2.y + 50
+  shouldBeNear baseline1 baseline2 0.01
+
+test "flex baseline: align-self baseline overrides container" := do
+  -- Container uses center, but one item uses baseline
+  let props := { FlexContainer.row with alignItems := .center }
+  let baselineItem := { FlexItem.default with alignSelf := some .baseline }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf' 1 50 40 {} (.flexChild baselineItem),
+    LayoutNode.leaf 2 (ContentSize.mk' 50 40)  -- uses center
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 2 is centered: (100 - 40) / 2 = 30
+  shouldBeNear cl2.y 30 0.01
+  -- Item 1 uses baseline alignment (alone, so starts at top)
+  -- Note: single baseline item in a line uses its own baseline as max
+  shouldBeNear cl1.y 0 0.01
+
+test "grid baseline: items in same row align baselines" := do
+  let props := { GridContainer.columns 2 with alignItems := .baseline }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.withBaseline 50 40 20),
+    LayoutNode.leaf 2 (ContentSize.withBaseline 50 60 40)
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Both items in same row, baselines should align
+  let baseline1 := cl1.y + 20
+  let baseline2 := cl2.y + 40
+  shouldBeNear baseline1 baseline2 0.01
+
+test "grid baseline: different rows have independent baselines" := do
+  -- 1-column grid forces items into different rows
+  let props := { GridContainer.columns 1 with alignItems := .baseline }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.withBaseline 100 40 20),
+    LayoutNode.leaf 2 (ContentSize.withBaseline 100 60 40)
+  ]
+  let result := layout node 200 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Items are in different rows, so baseline alignment is independent
+  -- Each item should be at the top of its row (only item in each row)
+  shouldBeNear cl1.y 0 0.01
+  shouldSatisfy (cl2.y > cl1.y) "item 2 should be in second row"
 
 #generate_tests
 
