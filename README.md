@@ -16,14 +16,9 @@ Trellis provides CSS-style layout computation without any rendering dependencies
 Add to your `lakefile.lean`:
 
 ```lean
-require trellis from git "https://github.com/your-org/trellis" @ "main"
+require trellis from git "https://github.com/nathanial/trellis" @ "v0.0.1"
 ```
 
-Or for local development in a workspace:
-
-```lean
-require trellis from ".." / "trellis"
-```
 
 ## Quick Start
 
