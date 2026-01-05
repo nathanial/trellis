@@ -82,16 +82,13 @@ def resolveFlexBasis (basis : Dimension) (contentMain : Length)
 
 /-- Collect flex items from children with initial measurements. -/
 def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
-    (availableMain : Length) (getContentSize : LayoutNode → Length × Length) : Array FlexItemState := Id.run do
+    (availableMain availableCross : Length) (getContentSize : LayoutNode → Length × Length) : Array FlexItemState := Id.run do
   let mut items : Array FlexItemState := #[]
   for child in children do
     let flexProps := child.flexItem?.getD FlexItem.default
     let contentSize := getContentSize child
     let contentMain := axis.mainFromPair contentSize
     let contentCross := axis.crossFromPair contentSize
-
-    -- Resolve flex-basis
-    let flexBasis := resolveFlexBasis flexProps.basis contentMain availableMain
 
     -- Get constraints
     let box := child.box
@@ -100,9 +97,19 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
     let minCross := axis.crossMin box
     let maxCross := (axis.crossMax box).getD Length.unbounded
 
+    -- Resolve main dimension: use box.width/height if specified, otherwise flex-basis
+    let mainDim := axis.mainDimension box
+    let resolvedMain := match mainDim with
+      | .auto => resolveFlexBasis flexProps.basis contentMain availableMain
+      | _ => mainDim.resolve availableMain contentMain
+
+    -- Resolve cross dimension if specified (supports percentage)
+    let crossDim := axis.crossDimension box
+    let resolvedCross := crossDim.resolve availableCross contentCross
+
     -- Compute hypothetical sizes (clamped to constraints)
-    let hypotheticalMain := min maxMain (max minMain flexBasis)
-    let hypotheticalCross := min maxCross (max minCross contentCross)
+    let hypotheticalMain := min maxMain (max minMain resolvedMain)
+    let hypotheticalCross := min maxCross (max minCross resolvedCross)
 
     -- Get baseline from content (distance from cross-start to baseline)
     -- For row direction: baseline is vertical distance from top
@@ -115,7 +122,7 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
       node := child
       margin := box.margin
       hypotheticalMainSize := hypotheticalMain
-      flexBaseSize := flexBasis
+      flexBaseSize := resolvedMain
       minMainSize := minMain
       maxMainSize := maxMain
       hypotheticalCrossSize := hypotheticalCross
@@ -489,7 +496,7 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
     (axis.mainSize w h, axis.crossSize w h)
 
   -- Phase 2: Collect items
-  let items := collectFlexItems axis children availableMain getContentSize
+  let items := collectFlexItems axis children availableMain availableCross getContentSize
 
   -- Phase 3: Partition into lines
   let lines := partitionIntoLines items container.wrap availableMain container.gap

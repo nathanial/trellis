@@ -527,11 +527,18 @@ def positionGridItems (items : Array GridItemState) (rowTracks colTracks : Array
     let justifySelf := gridItem.justifySelf.getD container.justifyItems
     let alignSelf := gridItem.alignSelf.getD container.alignItems
 
+    -- Resolve percentage dimensions against cell size
+    let box := item.node.box
+    let availWidth := cellWidth - item.margin.horizontal
+    let availHeight := cellHeight - item.margin.vertical
+    let resolvedItemWidth := box.width.resolve availWidth item.contentWidth
+    let resolvedItemHeight := box.height.resolve availHeight item.contentHeight
+
     -- Get row baseline (for single-row items)
     let rowBaseline := if item.rowStart < rowBaselines.size then rowBaselines[item.rowStart]! else 0
 
     -- Apply alignment (with margins and baseline)
-    let (x, y, w, h) := alignInCell item.contentWidth item.contentHeight
+    let (x, y, w, h) := alignInCell resolvedItemWidth resolvedItemHeight
       cellX cellY cellWidth cellHeight item.margin item.baseline rowBaseline justifySelf alignSelf
 
     result := result.push { item with resolvedX := x, resolvedY := y, resolvedWidth := w, resolvedHeight := h }
