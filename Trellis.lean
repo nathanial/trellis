@@ -10,3 +10,4 @@ import Trellis.Axis
 import Trellis.Node
 import Trellis.Result
 import Trellis.Algorithm
+import Trellis.ScaleAlgorithm

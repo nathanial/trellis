@@ -58,6 +58,33 @@ def expand (r : LayoutRect) (insets : EdgeInsets) : LayoutRect :=
 
 end LayoutRect
 
+/-- Computed scale transform metadata for content scaling.
+    Stores the scale factors and offsets computed for a container with contentScale. -/
+structure ScaleMetadata where
+  scaleX : Float := 1.0
+  scaleY : Float := 1.0
+  /-- Offset from container's contentRect origin to scaled content origin. -/
+  offsetX : Float := 0.0
+  offsetY : Float := 0.0
+  /-- The intrinsic (unscaled) size of the content. -/
+  intrinsicWidth : Float := 0.0
+  intrinsicHeight : Float := 0.0
+  /-- Which area responds to hit testing. -/
+  hitArea : ScaleHitArea := .scaled
+deriving Repr, BEq, Inhabited
+
+namespace ScaleMetadata
+
+def identity : ScaleMetadata := {}
+
+/-- Get the scaled content width. -/
+def scaledWidth (m : ScaleMetadata) : Float := m.intrinsicWidth * m.scaleX
+
+/-- Get the scaled content height. -/
+def scaledHeight (m : ScaleMetadata) : Float := m.intrinsicHeight * m.scaleY
+
+end ScaleMetadata
+
 /-- Computed layout for a single node. -/
 structure ComputedLayout where
   nodeId : Nat
@@ -65,17 +92,24 @@ structure ComputedLayout where
   borderRect : LayoutRect
   /-- Content box (actual drawable area after padding). -/
   contentRect : LayoutRect
+  /-- Scale metadata for containers with contentScale. -/
+  scaleMetadata : Option ScaleMetadata := none
 deriving Repr, BEq, Inhabited
 
 namespace ComputedLayout
 
 /-- Create a computed layout with same rect for border and content. -/
 def simple (nodeId : Nat) (rect : LayoutRect) : ComputedLayout :=
-  ⟨nodeId, rect, rect⟩
+  { nodeId, borderRect := rect, contentRect := rect }
 
 /-- Create with insets applied. -/
 def withPadding (nodeId : Nat) (rect : LayoutRect) (padding : EdgeInsets) : ComputedLayout :=
-  ⟨nodeId, rect, rect.inset padding⟩
+  { nodeId, borderRect := rect, contentRect := rect.inset padding }
+
+/-- Create with scale metadata. -/
+def withScale (nodeId : Nat) (borderRect contentRect : LayoutRect)
+    (scale : ScaleMetadata) : ComputedLayout :=
+  { nodeId, borderRect, contentRect, scaleMetadata := some scale }
 
 /-- Get the main rect for drawing. -/
 def rect (cl : ComputedLayout) : LayoutRect := cl.borderRect

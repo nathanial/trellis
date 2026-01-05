@@ -69,6 +69,59 @@ def total (e : EdgeInsets) : Length := e.horizontal + e.vertical
 
 end EdgeInsets
 
+/-- How content scales to fit its container. -/
+inductive ContentScaleMode where
+  | contain   -- Fit inside, maintain aspect ratio (may leave gaps)
+  | cover     -- Fill completely, maintain aspect ratio (may clip)
+  | stretch   -- Stretch to fill (distorts aspect ratio)
+deriving Repr, BEq, Inhabited
+
+/-- Anchor point for scaled content within its container. -/
+inductive ScaleAnchor where
+  | center
+  | topLeft
+  | top
+  | topRight
+  | left
+  | right
+  | bottomLeft
+  | bottom
+  | bottomRight
+deriving Repr, BEq, Inhabited
+
+/-- Which area responds to hit testing for scaled content. -/
+inductive ScaleHitArea where
+  | scaled     -- Only hit the actual scaled content bounds
+  | container  -- Hit anywhere in the container
+deriving Repr, BEq, Inhabited
+
+/-- Content scaling configuration for containers. -/
+structure ContentScale where
+  mode : ContentScaleMode := .contain
+  allowUpscale : Bool := false
+  anchor : ScaleAnchor := .center
+  hitArea : ScaleHitArea := .scaled
+deriving Repr, BEq, Inhabited
+
+namespace ContentScale
+
+def default : ContentScale := {}
+
+def contain : ContentScale := { mode := .contain }
+def cover : ContentScale := { mode := .cover }
+def stretch : ContentScale := { mode := .stretch }
+
+def withUpscale (cs : ContentScale) : ContentScale :=
+  { cs with allowUpscale := true }
+
+def withAnchor (cs : ContentScale) (anchor : ScaleAnchor) : ContentScale :=
+  { cs with anchor := anchor }
+
+def withContainerHit (cs : ContentScale) : ContentScale :=
+  { cs with hitArea := .container }
+
+end ContentScale
+
 /-- Box model constraints for a layout node. -/
 structure BoxConstraints where
   width : Dimension := .auto
