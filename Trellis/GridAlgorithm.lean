@@ -105,7 +105,22 @@ def extendRows (grid : OccupancyGrid) (newRows : Nat) : OccupancyGrid :=
     let newCells := grid.cells ++ (List.replicate additionalRows (List.replicate grid.cols false).toArray).toArray
     { grid with cells := newCells, rows := newRows }
 
+/-- Extend grid to accommodate more columns. -/
+def extendCols (grid : OccupancyGrid) (newCols : Nat) : OccupancyGrid :=
+  if newCols <= grid.cols then grid
+  else
+    let additionalCols := newCols - grid.cols
+    let newCells := grid.cells.map fun row =>
+      row ++ (List.replicate additionalCols false).toArray
+    { grid with cells := newCells, cols := newCols }
+
 end OccupancyGrid
+
+/-- Auto-placement cursor for sparse packing. -/
+structure PlacementCursor where
+  row : Nat := 0
+  col : Nat := 0
+deriving Repr, Inhabited
 
 /-! ## Grid Layout Functions -/
 
@@ -413,36 +428,85 @@ def alignInCell (itemWidth itemHeight : Length)
 
   (x, y, w, h)
 
-/-- Auto-place an item in the grid. Returns updated item and occupancy grid. -/
+/-- Auto-place an item in the grid. Returns updated item, occupancy grid, and cursor. -/
 def autoPlaceItem (item : GridItemState) (occupancy : OccupancyGrid)
-    (_flow : GridAutoFlow) (cols : Nat) : GridItemState × OccupancyGrid := Id.run do
+    (flow : GridAutoFlow) (cols rows : Nat) (cursor : PlacementCursor)
+    : GridItemState × OccupancyGrid × PlacementCursor := Id.run do
   let rowSpan := item.rowEnd - item.rowStart
   let colSpan := item.colEnd - item.colStart
 
-  -- Search for available position
+  -- Determine search parameters based on flow
+  let isDense := match flow with
+    | .rowDense | .columnDense => true
+    | _ => false
+  let isColumnFlow := match flow with
+    | .column | .columnDense => true
+    | _ => false
+
+  -- Starting position: dense starts at (0,0), sparse starts at cursor
+  let (startRow, startCol) := if isDense then (0, 0) else (cursor.row, cursor.col)
+
   let mut occ := occupancy
   let mut foundRow := 0
   let mut foundCol := 0
   let mut found := false
+  let mut newCursorRow := cursor.row
+  let mut newCursorCol := cursor.col
 
-  let maxRow := occ.rows + 10  -- Allow some implicit rows
-
-  for r in [:maxRow] do
-    if found then break
-    for c in [:cols] do
+  if isColumnFlow then
+    -- Column-major: outer loop columns, inner loop rows
+    -- Column-flow creates implicit columns, not implicit rows
+    let maxCol := occ.cols + 10  -- Allow implicit columns
+    for c in [startCol:maxCol] do
       if found then break
-      if c + colSpan <= cols then
-        -- Extend grid if needed
-        if r + rowSpan > occ.rows then
-          occ := occ.extendRows (r + rowSpan)
-        if occ.isAreaAvailable r (r + rowSpan) c (c + colSpan) then
-          foundRow := r
-          foundCol := c
-          found := true
+      -- For sparse mode on cursor's column, start from cursor row; otherwise row 0
+      let rowStart := if !isDense && c == startCol then startRow else 0
+      for r in [rowStart:rows] do  -- Only search within explicit rows
+        if found then break
+        if r + rowSpan <= rows then  -- Must fit within explicit rows
+          if c + colSpan > occ.cols then
+            occ := occ.extendCols (c + colSpan)
+          if r + rowSpan > occ.rows then
+            occ := occ.extendRows (r + rowSpan)
+          if occ.isAreaAvailable r (r + rowSpan) c (c + colSpan) then
+            foundRow := r
+            foundCol := c
+            found := true
+            -- Update cursor to next position (for sparse mode)
+            if r + rowSpan < rows then
+              newCursorRow := r + rowSpan
+              newCursorCol := c
+            else
+              newCursorRow := 0
+              newCursorCol := c + 1
+  else
+    -- Row-major: outer loop rows, inner loop columns (default behavior)
+    let maxRow := occ.rows + 10
+    for r in [startRow:maxRow] do
+      if found then break
+      let colStart := if !isDense && r == startRow then startCol else 0
+      for c in [colStart:cols] do
+        if found then break
+        if c + colSpan <= cols then
+          if r + rowSpan > occ.rows then
+            occ := occ.extendRows (r + rowSpan)
+          if occ.isAreaAvailable r (r + rowSpan) c (c + colSpan) then
+            foundRow := r
+            foundCol := c
+            found := true
+            -- Update cursor to next position
+            if c + colSpan < cols then
+              newCursorRow := r
+              newCursorCol := c + colSpan
+            else
+              newCursorRow := r + 1
+              newCursorCol := 0
 
   -- Mark area as occupied
   if foundRow + rowSpan > occ.rows then
     occ := occ.extendRows (foundRow + rowSpan)
+  if foundCol + colSpan > occ.cols then
+    occ := occ.extendCols (foundCol + colSpan)
   occ := occ.markOccupied foundRow (foundRow + rowSpan) foundCol (foundCol + colSpan)
 
   let newItem := { item with
@@ -451,7 +515,9 @@ def autoPlaceItem (item : GridItemState) (occupancy : OccupancyGrid)
     colStart := foundCol
     colEnd := foundCol + colSpan
   }
-  (newItem, occ)
+
+  let newCursor : PlacementCursor := { row := newCursorRow, col := newCursorCol }
+  (newItem, occ, newCursor)
 
 /-- Place all grid items, resolving explicit positions and auto-placing others. -/
 def placeAllItems (items : Array GridItemState) (container : GridContainer)
@@ -488,6 +554,7 @@ def placeAllItems (items : Array GridItemState) (container : GridContainer)
 
   -- Second pass: auto-place remaining items
   let mut finalItems : Array GridItemState := #[]
+  let mut cursor := PlacementCursor.mk 0 0  -- Initialize cursor for sparse placement
   for item in placedItems do
     let placement := item.node.gridItem?.map (·.placement) |>.getD GridPlacement.auto
     let hasExplicitRow := hasExplicitPlacement placement.row
@@ -504,9 +571,11 @@ def placeAllItems (items : Array GridItemState) (container : GridContainer)
         rowStart := 0, rowEnd := rowSpan,
         colStart := 0, colEnd := colSpan
       }
-      let (placed, newOcc) := autoPlaceItem itemWithSpan occupancy container.autoFlow maxCol
+      let (placed, newOcc, newCursor) := autoPlaceItem itemWithSpan occupancy container.autoFlow maxCol maxRow cursor
       occupancy := newOcc
+      cursor := newCursor
       maxRow := max maxRow placed.rowEnd
+      maxCol := max maxCol placed.colEnd
       finalItems := finalItems.push placed
 
   (finalItems, maxRow, maxCol)

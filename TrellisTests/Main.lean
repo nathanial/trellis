@@ -554,6 +554,148 @@ test "grid auto-places items in row-major order" := do
   -- Item 4 should be at column 0
   shouldBeNear cl4.x 0 0.01
 
+/-! ## Grid Auto-Flow Tests -/
+
+test "grid-auto-flow: row places items left-to-right, top-to-bottom" := do
+  let props := { GridContainer.columns 3 with autoFlow := .row }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 30)
+  ]
+  let result := layout node 300 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  let cl4 := result.get! 4
+  -- Items 1, 2, 3 on row 1 (same y)
+  shouldBeNear cl1.y cl2.y 0.01
+  shouldBeNear cl2.y cl3.y 0.01
+  -- Item 4 on row 2, column 1
+  shouldSatisfy (cl4.y > cl1.y) "item 4 should be on row 2"
+  shouldBeNear cl4.x 0 0.01
+
+test "grid-auto-flow: column places items top-to-bottom, left-to-right" := do
+  let props := { GridContainer.withTemplate #[.fr 1, .fr 1, .fr 1] #[.fr 1, .fr 1] with
+    autoFlow := .column
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 0 30)
+  ]
+  let result := layout node 200 300
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  let cl4 := result.get! 4
+  -- Items 1, 2, 3 in column 1 (same x)
+  shouldBeNear cl1.x cl2.x 0.01
+  shouldBeNear cl2.x cl3.x 0.01
+  -- Item 4 in column 2
+  shouldSatisfy (cl4.x > cl1.x) "item 4 should be in column 2"
+  shouldBeNear cl4.y 0 0.01
+
+test "grid-auto-flow: rowDense backfills gaps" := do
+  let props := { GridContainer.columns 3 with autoFlow := .rowDense }
+  -- Item 1 spans 2 columns starting at col 0, leaving col 2 open
+  -- Item 2 is 1x1, with dense it should fill (0, 2)
+  let spanItem := { GridItem.default with
+    placement := { column := GridSpan.spanTracks 2 }
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf' 1 0 30 {} (.gridChild spanItem),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
+  ]
+  let result := layout node 300 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Item 1 at (0, 0), spans columns 0-1
+  shouldBeNear cl1.x 0 0.01
+  shouldBeNear cl1.width 200 0.01
+  -- Item 2 fills the gap at column 2, same row as item 1
+  shouldBeNear cl2.x 200 0.01
+  shouldBeNear cl2.y cl1.y 0.01
+  -- Item 3 on row 2
+  shouldSatisfy (cl3.y > cl1.y) "item 3 should be on row 2"
+
+test "grid-auto-flow: row sparse leaves gaps" := do
+  let props := { GridContainer.columns 3 with autoFlow := .row }
+  -- Item 1 is 1x1 at (0,0)
+  -- Item 2 is 2-column span, can't fit in remaining 2 cells if starting from cursor
+  -- Item 3 with sparse mode should NOT backfill gap at (0,1)
+  let spanItem := { GridItem.default with
+    placement := { column := GridSpan.spanTracks 2 }
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf' 2 0 30 {} (.gridChild spanItem),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
+  ]
+  let result := layout node 300 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Item 1 at (0, 0)
+  shouldBeNear cl1.x 0 0.01
+  shouldBeNear cl1.y 0 0.01
+  -- Item 2 at (0, 1) since it fits in remaining 2 columns
+  shouldBeNear cl2.x 100 0.01
+  shouldBeNear cl2.y cl1.y 0.01
+  -- Item 3 continues from where item 2 ended
+  shouldSatisfy (cl3.y > cl1.y) "item 3 should be on row 2"
+  shouldBeNear cl3.x 0 0.01
+
+test "grid-auto-flow: columnDense backfills column gaps" := do
+  let props := { GridContainer.withTemplate #[.fr 1, .fr 1, .fr 1] #[.fr 1, .fr 1] with
+    autoFlow := .columnDense
+  }
+  let spanItem := { GridItem.default with
+    placement := { row := GridSpan.spanTracks 2 }
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf' 1 0 30 {} (.gridChild spanItem),  -- spans 2 rows in col 0
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
+  ]
+  let result := layout node 200 300
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Item 1 at column 0, spans 2 rows (taller than single-row items)
+  shouldBeNear cl1.x 0 0.01
+  shouldSatisfy (cl1.height > cl2.height) "item 1 should be taller (spans 2 rows)"
+  -- Item 2 in same column as item 1, but below it (dense backfills row 2)
+  shouldBeNear cl2.x 0 0.01
+  shouldSatisfy (cl2.y > cl1.y) "item 2 should be below item 1"
+  -- Item 3 in column 1 (next column in column-first flow)
+  shouldSatisfy (cl3.x > cl1.x) "item 3 should be in column 2"
+
+test "grid-auto-flow: column creates implicit columns" := do
+  let props := { GridContainer.withTemplate #[.fr 1, .fr 1] #[.fr 1] with
+    autoFlow := .column
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 2 (ContentSize.mk' 0 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 0 30)
+  ]
+  -- 2 explicit rows, 1 explicit column, 3 items
+  -- Should create implicit columns
+  let result := layout node 300 200
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Items 1, 2 fill column 1 (rows 0 and 1)
+  shouldBeNear cl1.x cl2.x 0.01
+  shouldSatisfy (cl2.y > cl1.y) "item 2 should be below item 1"
+  -- Item 3 in implicit column 2
+  shouldSatisfy (cl3.x > cl1.x) "item 3 should be in implicit column"
+
 /-! ## Grid Explicit Placement Tests -/
 
 test "grid places items at explicit positions" := do
