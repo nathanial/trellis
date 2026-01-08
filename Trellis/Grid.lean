@@ -121,6 +121,34 @@ def autoFit (sizes : Array TrackSize) : GridTemplate :=
 
 end GridTemplate
 
+/-- Grid template areas for semantic grid definitions. -/
+structure GridTemplateAreas where
+  /-- Rows of area names; `none` represents an empty cell. -/
+  rows : Array (Array (Option String)) := #[]
+deriving Repr, BEq, Inhabited
+
+namespace GridTemplateAreas
+
+def empty : GridTemplateAreas := {}
+
+/-- Create template areas from explicit rows. -/
+def fromRows (rows : Array (Array (Option String))) : GridTemplateAreas :=
+  { rows }
+
+/-- Create template areas from string rows, where "." denotes an empty cell. -/
+def fromStrings (rows : Array (Array String)) : GridTemplateAreas :=
+  { rows := rows.map (·.map fun s => if s == "." then none else some s) }
+
+/-- Number of rows defined by template areas. -/
+def rowCount (areas : GridTemplateAreas) : Nat :=
+  areas.rows.size
+
+/-- Maximum column count across all area rows. -/
+def colCount (areas : GridTemplateAreas) : Nat :=
+  areas.rows.foldl (fun acc row => max acc row.size) 0
+
+end GridTemplateAreas
+
 /-- Reference to a grid line for item placement. -/
 inductive GridLine where
   | auto               -- Automatic placement
@@ -185,6 +213,7 @@ deriving Repr, BEq, Inhabited
 structure GridContainer where
   templateRows : GridTemplate := {}
   templateColumns : GridTemplate := {}
+  templateAreas : GridTemplateAreas := {}
   rowGap : Length := 0
   columnGap : Length := 0
   justifyItems : AlignItems := .stretch   -- Alignment within cells (inline axis)
@@ -224,6 +253,7 @@ end GridContainer
 /-- Properties for a grid item (child of grid container). -/
 structure GridItem where
   placement : GridPlacement := {}
+  area : Option String := none            -- Optional grid area name
   justifySelf : Option AlignItems := none  -- Override container's justifyItems
   alignSelf : Option AlignItems := none    -- Override container's alignItems
 deriving Repr, BEq, Inhabited
@@ -239,6 +269,10 @@ def atPosition (row col : Int) : GridItem :=
 /-- Place spanning multiple cells. -/
 def span (rowSpan colSpan : Nat) : GridItem :=
   { placement := GridPlacement.span rowSpan colSpan }
+
+/-- Place an item in a named grid area. -/
+def inArea (name : String) : GridItem :=
+  { area := some name }
 
 end GridItem
 

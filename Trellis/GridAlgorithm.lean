@@ -122,12 +122,131 @@ structure PlacementCursor where
   col : Nat := 0
 deriving Repr, Inhabited
 
+/-! ## Named Lines and Areas -/
+
+/-- Mapping from line names to line indices (0-indexed). -/
+abbrev LineNameMap := Array (String × Array Nat)
+
+/-- A named grid area derived from template areas. -/
+structure GridArea where
+  name : String
+  rowStart : Nat
+  rowEnd : Nat
+  colStart : Nat
+  colEnd : Nat
+deriving Repr, Inhabited
+
+/-- Internal bounds for building named areas. -/
+structure AreaBounds where
+  name : String
+  rowMin : Nat
+  rowMax : Nat
+  colMin : Nat
+  colMax : Nat
+deriving Repr, Inhabited
+
+/-- Add a line name mapping. -/
+def addLineName (names : LineNameMap) (name : String) (idx : Nat) : LineNameMap := Id.run do
+  let mut result := names
+  let mut found := false
+  for i in [:names.size] do
+    let (n, idxs) := names[i]!
+    if n == name then
+      found := true
+      result := result.set! i (n, idxs.push idx)
+  if !found then
+    result := result.push (name, #[idx])
+  result
+
+/-- Find line indices for a given name. -/
+def findLineName (names : LineNameMap) (name : String) : Option (Array Nat) := Id.run do
+  for entry in names do
+    if entry.fst == name then
+      return some entry.snd
+  none
+
+/-- Resolve a name to a specific line index (first for start, last for end). -/
+def resolveLineName (names : LineNameMap) (name : String) (isEnd : Bool) : Option Nat :=
+  match findLineName names name with
+  | some idxs =>
+    if idxs.isEmpty then none
+    else
+      let idx := if isEnd then idxs[idxs.size - 1]! else idxs[0]!
+      some idx
+  | none => none
+
+/-- Merge line name mappings. -/
+def mergeLineNames (base extra : LineNameMap) : LineNameMap := Id.run do
+  let mut result := base
+  for entry in extra do
+    let (name, idxs) := entry
+    for idx in idxs do
+      result := addLineName result name idx
+  result
+
+/-- Build line name mappings from expanded tracks. -/
+def buildTrackLineNames (tracks : Array GridTrack) : LineNameMap := Id.run do
+  let mut names : LineNameMap := #[]
+  for i in [:tracks.size] do
+    if let some name := tracks[i]!.name then
+      names := addLineName names name i
+  names
+
+/-- Collect named areas from template areas. -/
+def collectTemplateAreas (areas : GridTemplateAreas) : Array GridArea := Id.run do
+  let mut bounds : Array AreaBounds := #[]
+  for r in [:areas.rows.size] do
+    let row := areas.rows[r]!
+    for c in [:row.size] do
+      match row[c]! with
+      | some name =>
+        let mut found := false
+        for i in [:bounds.size] do
+          let b := bounds[i]!
+          if b.name == name then
+            found := true
+            let updated := {
+              b with
+                rowMin := min b.rowMin r,
+                rowMax := max b.rowMax r,
+                colMin := min b.colMin c,
+                colMax := max b.colMax c
+            }
+            bounds := bounds.set! i updated
+        if !found then
+          bounds := bounds.push { name, rowMin := r, rowMax := r, colMin := c, colMax := c }
+      | none => pure ()
+  bounds.map fun b =>
+    { name := b.name
+      rowStart := b.rowMin
+      rowEnd := b.rowMax + 1
+      colStart := b.colMin
+      colEnd := b.colMax + 1 }
+
+/-- Build line names from named areas (adds "<area>-start" and "<area>-end"). -/
+def buildAreaLineNames (areas : Array GridArea) : LineNameMap × LineNameMap := Id.run do
+  let mut rowNames : LineNameMap := #[]
+  let mut colNames : LineNameMap := #[]
+  for area in areas do
+    rowNames := addLineName rowNames (area.name ++ "-start") area.rowStart
+    rowNames := addLineName rowNames (area.name ++ "-end") area.rowEnd
+    colNames := addLineName colNames (area.name ++ "-start") area.colStart
+    colNames := addLineName colNames (area.name ++ "-end") area.colEnd
+  (rowNames, colNames)
+
+/-- Find a named area by name. -/
+def findArea (areas : Array GridArea) (name : String) : Option GridArea := Id.run do
+  for area in areas do
+    if area.name == name then
+      return some area
+  none
+
 /-! ## Grid Layout Functions -/
 
 /-- Resolve a GridLine to a 0-indexed track index. -/
-def resolveGridLine (line : GridLine) (trackCount : Nat) (isEnd : Bool) (spanCount : Nat := 1) : Nat :=
+def resolveGridLine (line : GridLine) (trackCount : Nat) (lineNames : LineNameMap) (isEnd : Bool) : Nat :=
   match line with
-  | .auto => if isEnd then spanCount else 0  -- Will be determined by auto-placement
+  | .auto => if isEnd then 1 else 0  -- Will be determined by auto-placement
   | .line n =>
     if n >= 0 then
       min (n.toNat - 1) trackCount  -- CSS lines are 1-indexed
@@ -135,8 +254,11 @@ def resolveGridLine (line : GridLine) (trackCount : Nat) (isEnd : Bool) (spanCou
       -- Negative lines count from end (e.g., -1 = last line)
       let fromEnd := (-n).toNat
       if fromEnd <= trackCount + 1 then trackCount + 1 - fromEnd else 0
-  | .span n => spanCount + n - 1  -- Span is relative to start
-  | .named _ => 0  -- Named lines not yet supported
+  | .span n => if isEnd then n else 0
+  | .named s =>
+    match resolveLineName lineNames s isEnd with
+    | some idx => min idx trackCount
+    | none => 0
 
 /-- Check if a GridSpan has explicit placement. -/
 def hasExplicitPlacement (span : GridSpan) : Bool :=
@@ -153,25 +275,16 @@ def getSpanCount (span : GridSpan) : Nat :=
   | _ => 1
 
 /-- Resolve a GridSpan to start and end indices. -/
-def resolveGridSpan (span : GridSpan) (trackCount : Nat) (defaultStart : Nat := 0) : Nat × Nat :=
+def resolveGridSpan (span : GridSpan) (trackCount : Nat) (lineNames : LineNameMap := #[])
+    (defaultStart : Nat := 0) : Nat × Nat :=
   let startIdx := match span.start with
     | .auto => defaultStart
-    | .line n =>
-      if n >= 0 then min (n.toNat - 1) trackCount
-      else
-        let fromEnd := (-n).toNat
-        if fromEnd <= trackCount + 1 then trackCount + 1 - fromEnd else 0
     | .span _ => defaultStart
-    | .named _ => defaultStart
+    | _ => resolveGridLine span.start trackCount lineNames false
   let endIdx := match span.finish with
     | .auto => startIdx + 1
-    | .line n =>
-      if n >= 0 then min n.toNat (trackCount + 1)
-      else
-        let fromEnd := (-n).toNat
-        if fromEnd <= trackCount then trackCount + 1 - fromEnd else startIdx + 1
     | .span n => startIdx + n
-    | .named _ => startIdx + 1
+    | _ => resolveGridLine span.finish trackCount lineNames true
   (startIdx, max (startIdx + 1) endIdx)
 
 /-- Extract fr value from a TrackSize (including nested minmax). -/
@@ -213,6 +326,13 @@ def calculateAutoRepeatCount (sizes : Array TrackSize) (available gap : Length) 
       let count := (available / cycleWithGap).toUInt64.toNat
       max 1 count  -- At least 1 repeat
 
+/-- Determine repeat count for a track entry. -/
+def repeatEntryCount (mode : RepeatMode) (sizes : Array TrackSize) (available gap : Length) : Nat :=
+  match mode with
+  | .count n => n
+  | .autoFill => calculateAutoRepeatCount sizes available gap
+  | .autoFit => calculateAutoRepeatCount sizes available gap  -- Same as autoFill for now
+
 /-- Expand track entries to a flat array of TrackSizes. -/
 def expandEntries (entries : Array TrackEntry) (available gap : Length) : Array TrackSize := Id.run do
   let mut result : Array TrackSize := #[]
@@ -220,13 +340,23 @@ def expandEntries (entries : Array TrackEntry) (available gap : Length) : Array 
     match entry with
     | .single track => result := result.push track.size
     | .repeat mode sizes =>
-      let repeatCount := match mode with
-        | .count n => n
-        | .autoFill => calculateAutoRepeatCount sizes available gap
-        | .autoFit => calculateAutoRepeatCount sizes available gap  -- Same as autoFill for now
+      let repeatCount := repeatEntryCount mode sizes available gap
       for _ in [:repeatCount] do
         for size in sizes do
           result := result.push size
+  result
+
+/-- Expand track entries to a flat array of GridTracks (preserving names when available). -/
+def expandEntryTracks (entries : Array TrackEntry) (available gap : Length) : Array GridTrack := Id.run do
+  let mut result : Array GridTrack := #[]
+  for entry in entries do
+    match entry with
+    | .single track => result := result.push track
+    | .repeat mode sizes =>
+      let repeatCount := repeatEntryCount mode sizes available gap
+      for _ in [:repeatCount] do
+        for size in sizes do
+          result := result.push { size, name := none }
   result
 
 /-- Get expanded track sizes from a GridTemplate (handles both legacy tracks and entries). -/
@@ -237,6 +367,13 @@ def getExpandedSizes (template : GridTemplate) (available gap : Length) : Array 
   else
     -- Expand entries
     expandEntries template.entries available gap
+
+/-- Get expanded track definitions from a GridTemplate (preserving line names). -/
+def getExpandedTracks (template : GridTemplate) (available gap : Length) : Array GridTrack :=
+  if template.entries.isEmpty then
+    template.tracks
+  else
+    expandEntryTracks template.entries available gap
 
 /-- Initialize ResolvedTrack array from a GridTemplate. -/
 def initTracks (template : GridTemplate) (minCount : Nat) (available : Length := 0) (gap : Length := 0) : Array ResolvedTrack := Id.run do
@@ -521,7 +658,8 @@ def autoPlaceItem (item : GridItemState) (occupancy : OccupancyGrid)
 
 /-- Place all grid items, resolving explicit positions and auto-placing others. -/
 def placeAllItems (items : Array GridItemState) (container : GridContainer)
-    (explicitRows explicitCols : Nat) : Array GridItemState × Nat × Nat := Id.run do
+    (explicitRows explicitCols : Nat) (rowLineNames colLineNames : LineNameMap)
+    (areas : Array GridArea) : Array GridItemState × Nat × Nat := Id.run do
   let cols := max 1 explicitCols
   let rows := max 1 explicitRows
   let mut placedItems : Array GridItemState := #[]
@@ -531,20 +669,32 @@ def placeAllItems (items : Array GridItemState) (container : GridContainer)
 
   -- First pass: place items with explicit positions
   for item in items do
-    let placement := item.node.gridItem?.map (·.placement) |>.getD GridPlacement.auto
-    let hasExplicitRow := hasExplicitPlacement placement.row
-    let hasExplicitCol := hasExplicitPlacement placement.column
+    let gridItem := item.node.gridItem?.getD GridItem.default
+    let placement := gridItem.placement
+    let areaPlacement := gridItem.area.bind (findArea areas)
+    let hasExplicitRow := match areaPlacement with
+      | some _ => true
+      | none => hasExplicitPlacement placement.row
+    let hasExplicitCol := match areaPlacement with
+      | some _ => true
+      | none => hasExplicitPlacement placement.column
 
     if hasExplicitRow && hasExplicitCol then
       -- Both explicit - place directly
-      let (rowStart, rowEnd) := resolveGridSpan placement.row maxRow
-      let (colStart, colEnd) := resolveGridSpan placement.column maxCol
+      let (rowStart, rowEnd, colStart, colEnd) := match areaPlacement with
+        | some area => (area.rowStart, area.rowEnd, area.colStart, area.colEnd)
+        | none =>
+          let (rs, re) := resolveGridSpan placement.row maxRow rowLineNames
+          let (cs, ce) := resolveGridSpan placement.column maxCol colLineNames
+          (rs, re, cs, ce)
       maxRow := max maxRow rowEnd
       maxCol := max maxCol colEnd
 
       -- Extend occupancy if needed
       if maxRow > occupancy.rows then
         occupancy := occupancy.extendRows maxRow
+      if maxCol > occupancy.cols then
+        occupancy := occupancy.extendCols maxCol
 
       occupancy := occupancy.markOccupied rowStart rowEnd colStart colEnd
       placedItems := placedItems.push { item with rowStart, rowEnd, colStart, colEnd }
@@ -556,9 +706,15 @@ def placeAllItems (items : Array GridItemState) (container : GridContainer)
   let mut finalItems : Array GridItemState := #[]
   let mut cursor := PlacementCursor.mk 0 0  -- Initialize cursor for sparse placement
   for item in placedItems do
-    let placement := item.node.gridItem?.map (·.placement) |>.getD GridPlacement.auto
-    let hasExplicitRow := hasExplicitPlacement placement.row
-    let hasExplicitCol := hasExplicitPlacement placement.column
+    let gridItem := item.node.gridItem?.getD GridItem.default
+    let placement := gridItem.placement
+    let areaPlacement := gridItem.area.bind (findArea areas)
+    let hasExplicitRow := match areaPlacement with
+      | some _ => true
+      | none => hasExplicitPlacement placement.row
+    let hasExplicitCol := match areaPlacement with
+      | some _ => true
+      | none => hasExplicitPlacement placement.column
 
     if hasExplicitRow && hasExplicitCol then
       -- Already placed
@@ -624,20 +780,36 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   let availableWidth := max 0 (containerWidth - padding.horizontal)
   let availableHeight := max 0 (containerHeight - padding.vertical)
 
-  -- Get explicit track counts (from expanded entries or legacy tracks)
-  let expandedCols := getExpandedSizes container.templateColumns availableWidth container.columnGap
-  let expandedRows := getExpandedSizes container.templateRows availableHeight container.rowGap
-  let explicitCols := expandedCols.size
-  let explicitRows := expandedRows.size
+  -- Get explicit track counts (from expanded entries, legacy tracks, and template areas)
+  let expandedColTracks := getExpandedTracks container.templateColumns availableWidth container.columnGap
+  let expandedRowTracks := getExpandedTracks container.templateRows availableHeight container.rowGap
+  let areaDefs := collectTemplateAreas container.templateAreas
+  let areaRowCount := GridTemplateAreas.rowCount container.templateAreas
+  let areaColCount := GridTemplateAreas.colCount container.templateAreas
+  let explicitCols := max expandedColTracks.size areaColCount
+  let explicitRows := max expandedRowTracks.size areaRowCount
+
+  -- Build line name maps (track names + template area line names)
+  let rowLineNames := buildTrackLineNames expandedRowTracks
+  let colLineNames := buildTrackLineNames expandedColTracks
+  let (areaRowLineNames, areaColLineNames) := buildAreaLineNames areaDefs
+  let rowLineNames := mergeLineNames rowLineNames areaRowLineNames
+  let colLineNames := mergeLineNames colLineNames areaColLineNames
 
   -- Initialize items with content sizes, margins, and baselines
   let mut items : Array GridItemState := #[]
   for child in children do
     let contentSize := getContentSize child
     let box := child.box
-    let placement := child.gridItem?.map (·.placement) |>.getD GridPlacement.auto
-    let (rowStart, rowEnd) := resolveGridSpan placement.row explicitRows
-    let (colStart, colEnd) := resolveGridSpan placement.column explicitCols
+    let gridItem := child.gridItem?.getD GridItem.default
+    let placement := gridItem.placement
+    let areaPlacement := gridItem.area.bind (findArea areaDefs)
+    let (rowStart, rowEnd, colStart, colEnd) := match areaPlacement with
+      | some area => (area.rowStart, area.rowEnd, area.colStart, area.colEnd)
+      | none =>
+        let (rs, re) := resolveGridSpan placement.row explicitRows rowLineNames
+        let (cs, ce) := resolveGridSpan placement.column explicitCols colLineNames
+        (rs, re, cs, ce)
     -- Get baseline from content (distance from top to baseline)
     let baseline := match child.content with
       | some cs => cs.getBaseline
@@ -653,7 +825,8 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
 
   -- Phase 2: Place items (explicit + auto-placement)
   let minCols := max 1 explicitCols
-  let (placedItems, actualRows, actualCols) := placeAllItems items container explicitRows minCols
+  let (placedItems, actualRows, actualCols) :=
+    placeAllItems items container explicitRows minCols rowLineNames colLineNames areaDefs
 
   -- Phase 3: Initialize and size tracks (pass gap for auto-fill/auto-fit calculation)
   let mut colTracks := initTracks container.templateColumns actualCols availableWidth container.columnGap

@@ -712,6 +712,64 @@ test "grid places items at explicit positions" := do
   shouldBeNear cl.x 200 0.01  -- column 3 starts at 200
   shouldBeNear cl.y 100 0.01  -- row 2 starts at 100
 
+/-! ## Grid Named Lines and Areas Tests -/
+
+test "grid named lines place items by line name" := do
+  let columns : Array GridTrack := #[
+    { size := .fr 1, name := some "left" },
+    { size := .fr 1, name := some "main" },
+    { size := .fr 1, name := some "right" }
+  ]
+  let props : GridContainer := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.fr 1]
+      templateColumns := { tracks := columns }
+  }
+  let itemProps := { GridItem.default with
+    placement := {
+      row := { start := .line 1 }
+      column := { start := .named "main", finish := .named "right" }
+    }
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf' 1 0 0 {} (.gridChild itemProps)
+  ]
+  let result := layout node 300 100
+  let cl := result.get! 1
+  shouldBeNear cl.x 100 0.01
+  shouldBeNear cl.width 100 0.01
+
+test "grid template areas place items by area name" := do
+  let areas := GridTemplateAreas.fromStrings #[
+    #["header", "header", "header"],
+    #["sidebar", "content", "content"],
+    #["footer", "footer", "footer"]
+  ]
+  let props : GridContainer := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.fr 1, .fr 1, .fr 1]
+      templateColumns := GridTemplate.fromSizes #[.fr 1, .fr 1, .fr 1]
+      templateAreas := areas
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf' 1 0 0 {} (.gridChild (GridItem.inArea "header")),
+    LayoutNode.leaf' 2 0 0 {} (.gridChild (GridItem.inArea "sidebar")),
+    LayoutNode.leaf' 3 0 0 {} (.gridChild (GridItem.inArea "content"))
+  ]
+  let result := layout node 300 300
+  let header := result.get! 1
+  let sidebar := result.get! 2
+  let content := result.get! 3
+  shouldBeNear header.y 0 0.01
+  shouldBeNear header.width 300 0.01
+  shouldBeNear header.height 100 0.01
+  shouldBeNear sidebar.x 0 0.01
+  shouldBeNear sidebar.y 100 0.01
+  shouldBeNear sidebar.width 100 0.01
+  shouldBeNear content.x 100 0.01
+  shouldBeNear content.y 100 0.01
+  shouldBeNear content.width 200 0.01
+
 /-! ## Grid Spanning Tests -/
 
 test "grid item spanning multiple columns" := do
