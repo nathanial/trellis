@@ -25,6 +25,12 @@ inductive Dimension where
   | maxContent            -- Maximum content size
 deriving Repr, BEq, Inhabited
 
+/-- Positioning mode for layout nodes. -/
+inductive Position where
+  | static    -- Normal flow (default)
+  | absolute  -- Removed from flow, positioned relative to parent
+deriving Repr, BEq, Inhabited
+
 namespace Dimension
 
 def zero : Dimension := .length 0
@@ -130,6 +136,11 @@ structure BoxConstraints where
   maxWidth : Option Length := none
   minHeight : Length := 0
   maxHeight : Option Length := none
+  position : Position := .static
+  top : Option Length := none
+  right : Option Length := none
+  bottom : Option Length := none
+  left : Option Length := none
   margin : EdgeInsets := {}
   padding : EdgeInsets := {}
 deriving Repr, BEq, Inhabited

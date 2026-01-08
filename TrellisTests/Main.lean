@@ -239,6 +239,22 @@ test "zero flex-grow items keep their basis size" := do
   shouldBeNear cl1.width 50 0.01
   shouldBeNear cl2.width 250 0.01
 
+/-! ## Absolute Positioning Tests -/
+
+test "absolute positioned child does not affect flex layout" := do
+  let absBox : BoxConstraints := { position := .absolute, top := some 40, left := some 10 }
+  let node := LayoutNode.row 0 #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 20),
+    LayoutNode.leaf 2 (ContentSize.mk' 80 30) absBox
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  shouldBeNear cl1.x 0 0.01
+  shouldBeNear cl1.width 50 0.01
+  shouldBeNear cl2.x 10 0.01
+  shouldBeNear cl2.y 40 0.01
+
 /-! ## Flex Wrap Tests -/
 
 test "flex-wrap: wrap creates multiple lines" := do

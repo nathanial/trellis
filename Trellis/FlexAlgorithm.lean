@@ -481,6 +481,49 @@ def alignFlexLines (lines : Array FlexLine) (alignContent : AlignContent)
 
   positioned
 
+/-! ## Absolute Positioning -/
+
+/-- Resolve an absolutely positioned child relative to the parent's content box. -/
+def resolveAbsoluteRectFlex (child : LayoutNode) (availableWidth availableHeight : Length)
+    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutRect :=
+  let box := child.box
+  let contentSize := getContentSize child
+  let isContainer := !child.isLeaf
+  let baseWidth := match box.width with
+    | .auto =>
+      match box.left, box.right with
+      | some l, some r => max 0 (availableWidth - l - r)
+      | _, _ => if isContainer then availableWidth else contentSize.1
+    | dim => dim.resolve availableWidth contentSize.1
+  let baseHeight := match box.height with
+    | .auto =>
+      match box.top, box.bottom with
+      | some t, some b => max 0 (availableHeight - t - b)
+      | _, _ => if isContainer then availableHeight else contentSize.2
+    | dim => dim.resolve availableHeight contentSize.2
+  let width := box.clampWidth baseWidth
+  let height := box.clampHeight baseHeight
+  let x := match box.left, box.right with
+    | some l, _ => l
+    | none, some r => availableWidth - r - width
+    | none, none => 0
+  let y := match box.top, box.bottom with
+    | some t, _ => t
+    | none, some b => availableHeight - b - height
+    | none, none => 0
+  let x := x + padding.left + box.margin.left
+  let y := y + padding.top + box.margin.top
+  LayoutRect.mk' x y width height
+
+def partitionAbsoluteFlex (children : Array LayoutNode) : Array LayoutNode × Array LayoutNode :=
+  children.foldl (fun acc child =>
+    let (flow, abs) := acc
+    if child.box.position == .absolute then
+      (flow, abs.push child)
+    else
+      (flow.push child, abs)
+  ) (#[], #[])
+
 /-! ## Main Flex Layout Function -/
 
 /-- Layout a flex container. -/
@@ -490,13 +533,16 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
   let axis := AxisInfo.fromDirection container.direction
 
   -- Phase 1: Available space
+  let (availableWidth, availableHeight) :=
+    (max 0 (containerWidth - padding.horizontal),
+     max 0 (containerHeight - padding.vertical))
   let (availableMain, availableCross) :=
-    let (w, h) := (max 0 (containerWidth - padding.horizontal),
-                   max 0 (containerHeight - padding.vertical))
-    (axis.mainSize w h, axis.crossSize w h)
+    (axis.mainSize availableWidth availableHeight,
+     axis.crossSize availableWidth availableHeight)
 
   -- Phase 2: Collect items
-  let items := collectFlexItems axis children availableMain availableCross getContentSize
+  let (flowChildren, absChildren) := partitionAbsoluteFlex children
+  let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
 
   -- Phase 3: Partition into lines
   let lines := partitionIntoLines items container.wrap availableMain container.gap
@@ -542,6 +588,11 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
         let rect := LayoutRect.mk' x y width height
         result := result.add (ComputedLayout.simple item.node.id rect)
+
+  -- Absolute positioned children (do not affect layout flow)
+  for child in absChildren do
+    let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+    result := result.add (ComputedLayout.simple child.id rect)
 
   result
 

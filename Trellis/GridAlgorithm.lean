@@ -241,6 +241,49 @@ def findArea (areas : Array GridArea) (name : String) : Option GridArea := Id.ru
       return some area
   none
 
+/-! ## Absolute Positioning -/
+
+/-- Resolve an absolutely positioned child relative to the parent's content box. -/
+def resolveAbsoluteRect (child : LayoutNode) (availableWidth availableHeight : Length)
+    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutRect :=
+  let box := child.box
+  let contentSize := getContentSize child
+  let isContainer := !child.isLeaf
+  let baseWidth := match box.width with
+    | .auto =>
+      match box.left, box.right with
+      | some l, some r => max 0 (availableWidth - l - r)
+      | _, _ => if isContainer then availableWidth else contentSize.1
+    | dim => dim.resolve availableWidth contentSize.1
+  let baseHeight := match box.height with
+    | .auto =>
+      match box.top, box.bottom with
+      | some t, some b => max 0 (availableHeight - t - b)
+      | _, _ => if isContainer then availableHeight else contentSize.2
+    | dim => dim.resolve availableHeight contentSize.2
+  let width := box.clampWidth baseWidth
+  let height := box.clampHeight baseHeight
+  let x := match box.left, box.right with
+    | some l, _ => l
+    | none, some r => availableWidth - r - width
+    | none, none => 0
+  let y := match box.top, box.bottom with
+    | some t, _ => t
+    | none, some b => availableHeight - b - height
+    | none, none => 0
+  let x := x + padding.left + box.margin.left
+  let y := y + padding.top + box.margin.top
+  LayoutRect.mk' x y width height
+
+def partitionAbsolute (children : Array LayoutNode) : Array LayoutNode × Array LayoutNode :=
+  children.foldl (fun acc child =>
+    let (flow, abs) := acc
+    if child.box.position == .absolute then
+      (flow, abs.push child)
+    else
+      (flow.push child, abs)
+  ) (#[], #[])
+
 /-! ## Grid Layout Functions -/
 
 /-- Resolve a GridLine to a 0-indexed track index. -/
@@ -779,6 +822,7 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   -- Phase 1: Available space
   let availableWidth := max 0 (containerWidth - padding.horizontal)
   let availableHeight := max 0 (containerHeight - padding.vertical)
+  let (flowChildren, absChildren) := partitionAbsolute children
 
   -- Get explicit track counts (from expanded entries, legacy tracks, and template areas)
   let expandedColTracks := getExpandedTracks container.templateColumns availableWidth container.columnGap
@@ -798,7 +842,7 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
 
   -- Initialize items with content sizes, margins, and baselines
   let mut items : Array GridItemState := #[]
-  for child in children do
+  for child in flowChildren do
     let contentSize := getContentSize child
     let box := child.box
     let gridItem := child.gridItem?.getD GridItem.default
@@ -855,6 +899,11 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   for item in positionedItems do
     let rect := LayoutRect.mk' item.resolvedX item.resolvedY item.resolvedWidth item.resolvedHeight
     result := result.add (ComputedLayout.simple item.node.id rect)
+
+  -- Absolute positioned children (do not affect grid flow)
+  for child in absChildren do
+    let rect := resolveAbsoluteRect child availableWidth availableHeight padding getContentSize
+    result := result.add (ComputedLayout.simple child.id rect)
 
   result
 
