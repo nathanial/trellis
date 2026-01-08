@@ -488,18 +488,17 @@ def resolveAbsoluteRectFlex (child : LayoutNode) (availableWidth availableHeight
     (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutRect :=
   let box := child.box
   let contentSize := getContentSize child
-  let isContainer := !child.isLeaf
   let baseWidth := match box.width with
     | .auto =>
       match box.left, box.right with
       | some l, some r => max 0 (availableWidth - l - r)
-      | _, _ => if isContainer then availableWidth else contentSize.1
+      | _, _ => contentSize.1
     | dim => dim.resolve availableWidth contentSize.1
   let baseHeight := match box.height with
     | .auto =>
       match box.top, box.bottom with
       | some t, some b => max 0 (availableHeight - t - b)
-      | _, _ => if isContainer then availableHeight else contentSize.2
+      | _, _ => contentSize.2
     | dim => dim.resolve availableHeight contentSize.2
   let width := box.clampWidth baseWidth
   let height := box.clampHeight baseHeight
