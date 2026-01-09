@@ -1992,6 +1992,57 @@ test "flex order: negative order values" := do
   -- Item 2 with order=-1 should come before item 1 with order=0
   shouldSatisfy (cl2.x < cl1.x) "item 2 should be before item 1"
 
+/-! ## Aspect Ratio Tests -/
+
+test "aspect-ratio: width set, height computed" := do
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 50 50)
+    { width := .length 160, aspectRatio := some (16.0 / 9.0) }
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 160 0.01
+  shouldBeNear cl.height 90 0.01  -- 160 / (16/9) = 90
+
+test "aspect-ratio: height set, width computed" := do
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 50 50)
+    { height := .length 90, aspectRatio := some (16.0 / 9.0) }
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 160 0.01  -- 90 * (16/9) = 160
+  shouldBeNear cl.height 90 0.01
+
+test "aspect-ratio: both dimensions set, ratio ignored" := do
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 50 50)
+    { width := .length 100, height := .length 100, aspectRatio := some (16.0 / 9.0) }
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 100 0.01
+  shouldBeNear cl.height 100 0.01
+
+test "aspect-ratio: respects max-height constraint" := do
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 50 50)
+    { width := .length 160, maxHeight := some 50, aspectRatio := some (16.0 / 9.0) }
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 160 0.01
+  shouldBeNear cl.height 50 0.01  -- Clamped from 90 to 50
+
+test "aspect-ratio: in flex row" := do
+  let node := LayoutNode.row 0 #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 50) { width := .length 80, aspectRatio := some 2.0 }
+  ]
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 80 0.01
+  shouldBeNear cl.height 40 0.01  -- 80 / 2 = 40
+
+test "aspect-ratio: 1:1 square" := do
+  let node := LayoutNode.leaf 1 (ContentSize.mk' 50 50)
+    { width := .length 100, aspectRatio := some 1.0 }
+  let result := layout node 400 300
+  let cl := result.get! 1
+  shouldBeNear cl.width 100 0.01
+  shouldBeNear cl.height 100 0.01
+
 #generate_tests
 
 end TrellisTests

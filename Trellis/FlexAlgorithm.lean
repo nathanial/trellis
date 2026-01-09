@@ -124,6 +124,14 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
     let crossDim := axis.crossDimension box
     let resolvedCross := crossDim.resolve availableCross contentCross
 
+    -- Apply aspect-ratio (convert main/cross to width/height for ratio)
+    let (resolvedMain, resolvedCross) :=
+      if axis.isHorizontal then
+        applyAspectRatio resolvedMain resolvedCross mainDim.isAuto crossDim.isAuto box.aspectRatio
+      else
+        let (w, h) := applyAspectRatio resolvedCross resolvedMain crossDim.isAuto mainDim.isAuto box.aspectRatio
+        (h, w)
+
     -- Compute hypothetical sizes (clamped to constraints)
     let hypotheticalMain := min maxMain (max minMain resolvedMain)
     let hypotheticalCross := min maxCross (max minCross resolvedCross)
@@ -375,13 +383,18 @@ def resolveFlexibleLengths (line : FlexLine) (availableMain gap : Length) : Flex
 /-! ## Phase 5: Cross Axis Sizing -/
 
 /-- Resolve cross sizes based on align-items. -/
-def resolveCrossSizes (line : FlexLine) (alignItems : AlignItems) : FlexLine :=
+def resolveCrossSizes (line : FlexLine) (alignItems : AlignItems) (axis : AxisInfo) : FlexLine :=
   let items := line.items.map fun item =>
     let alignSelf := match item.node.flexItem? with
       | some fi => fi.alignSelf.getD alignItems
       | none => alignItems
+    -- Don't stretch if aspect-ratio controls the cross dimension
+    let crossDim := axis.crossDimension item.node.box
+    let hasAspectRatio := item.node.box.aspectRatio.isSome
+    let aspectRatioControlsCross := hasAspectRatio && crossDim.isAuto
     let crossSize := match alignSelf with
-      | .stretch => line.crossSize - item.margin.vertical
+      | .stretch => if aspectRatioControlsCross then item.hypotheticalCrossSize
+                    else line.crossSize - item.margin.vertical
       | _ => item.hypotheticalCrossSize
     { item with resolvedCrossSize := crossSize }
   { line with items }
@@ -611,7 +624,7 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
   -- Phase 5: Cross axis sizing (after line sizes are finalized)
   let lines := lines.map fun line =>
-    resolveCrossSizes line container.alignItems
+    resolveCrossSizes line container.alignItems axis
 
   -- Phases 6-7: Position items within lines
   let mut result := LayoutResult.empty

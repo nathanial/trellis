@@ -42,6 +42,9 @@ partial def layoutNode (node : LayoutNode) (availableWidth availableHeight : Len
   let resolvedHeight := match box.height with
     | .auto => if isContainer then availableHeight else contentSize.2
     | dim => dim.resolve availableHeight contentSize.2
+  -- Apply aspect-ratio if one dimension is auto
+  let (resolvedWidth, resolvedHeight) := applyAspectRatio resolvedWidth resolvedHeight
+    box.width.isAuto box.height.isAuto box.aspectRatio
   let width := box.clampWidth resolvedWidth
   let height := box.clampHeight resolvedHeight
 

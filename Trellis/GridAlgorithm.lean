@@ -800,6 +800,9 @@ def positionGridItems (items : Array GridItemState) (rowTracks colTracks : Array
     let availHeight := cellHeight - item.margin.vertical
     let resolvedItemWidth := box.width.resolve availWidth item.contentWidth
     let resolvedItemHeight := box.height.resolve availHeight item.contentHeight
+    -- Apply aspect-ratio if one dimension is auto
+    let (resolvedItemWidth, resolvedItemHeight) := applyAspectRatio
+      resolvedItemWidth resolvedItemHeight box.width.isAuto box.height.isAuto box.aspectRatio
 
     -- Get row baseline (for single-row items)
     let rowBaseline := if item.rowStart < rowBaselines.size then rowBaselines[item.rowStart]! else 0

@@ -136,6 +136,7 @@ structure BoxConstraints where
   maxWidth : Option Length := none
   minHeight : Length := 0
   maxHeight : Option Length := none
+  aspectRatio : Option Float := none  -- width/height ratio
   position : Position := .static
   top : Option Length := none
   right : Option Length := none
@@ -176,5 +177,22 @@ def clampHeight (c : BoxConstraints) (h : Length) : Length :=
   | none => clamped
 
 end BoxConstraints
+
+/-- Apply aspect-ratio to resolve auto dimensions.
+    aspectRatio is width/height. Returns (width, height). -/
+def applyAspectRatio (width height : Length) (widthIsAuto heightIsAuto : Bool)
+    (aspectRatio : Option Float) : Length × Length :=
+  match aspectRatio with
+  | none => (width, height)
+  | some ratio =>
+    if widthIsAuto && !heightIsAuto then
+      -- Height known, compute width
+      (height * ratio, height)
+    else if !widthIsAuto && heightIsAuto then
+      -- Width known, compute height
+      (width, width / ratio)
+    else
+      -- Both explicit or both auto: no change
+      (width, height)
 
 end Trellis
