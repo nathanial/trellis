@@ -1862,6 +1862,92 @@ test "grid with flex items that have flex-grow" := do
   -- Item 2 should grow to fill remaining space (200 - 20 = 180)
   shouldBeNear cl2.width 180 0.01
 
+/-! ## Margin Collapse Tests -/
+
+test "margin collapse: disabled by default (backward compatible)" := do
+  -- Without marginCollapse, margins are additive
+  let node := LayoutNode.column 0 #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { bottom := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := 15 } }
+  ]
+  let result := layout node 100 200
+  let cl2 := result.get! 2
+  -- Without collapse: y2 = 30 + 20 + 15 = 65
+  shouldBeNear cl2.y 65 0.01
+
+test "margin collapse: basic collapse takes max of adjacent margins" := do
+  let props := { FlexContainer.column with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { bottom := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := 15 } }
+  ]
+  let result := layout node 100 200
+  let cl2 := result.get! 2
+  -- With collapse: max(20, 15) = 20, so y2 = 30 + 20 = 50
+  shouldBeNear cl2.y 50 0.01
+
+test "margin collapse: does not apply to row direction" := do
+  let props := { FlexContainer.row with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { right := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { left := 15 } }
+  ]
+  let result := layout node 200 100
+  let cl2 := result.get! 2
+  -- No collapse in row: x2 = 50 + 20 + 15 = 85
+  shouldBeNear cl2.x 85 0.01
+
+test "margin collapse: both negative margins uses min" := do
+  let props := { FlexContainer.column with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { bottom := -10 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := -15 } }
+  ]
+  let result := layout node 100 200
+  let cl2 := result.get! 2
+  -- Both negative: min(-10, -15) = -15, so y2 = 30 + (-15) = 15
+  shouldBeNear cl2.y 15 0.01
+
+test "margin collapse: mixed positive and negative" := do
+  let props := { FlexContainer.column with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { bottom := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := -8 } }
+  ]
+  let result := layout node 100 200
+  let cl2 := result.get! 2
+  -- Mixed: 20 + (-8) = 12, so y2 = 30 + 12 = 42
+  shouldBeNear cl2.y 42 0.01
+
+test "margin collapse: first item keeps full top margin" := do
+  let props := { FlexContainer.column with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { top := 10, bottom := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := 15 } }
+  ]
+  let result := layout node 100 200
+  let cl1 := result.get! 1
+  -- First item keeps its top margin
+  shouldBeNear cl1.y 10 0.01
+
+test "margin collapse: three items chain collapse" := do
+  let props := { FlexContainer.column with marginCollapse := true }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 50 30) { margin := { bottom := 20 } },
+    LayoutNode.leaf 2 (ContentSize.mk' 50 30) { margin := { top := 15, bottom := 25 } },
+    LayoutNode.leaf 3 (ContentSize.mk' 50 30) { margin := { top := 10 } }
+  ]
+  let result := layout node 100 300
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- y1 = 0
+  -- y2 = 30 + max(20, 15) = 50
+  -- y3 = 50 + 30 + max(25, 10) = 105
+  shouldBeNear cl1.y 0 0.01
+  shouldBeNear cl2.y 50 0.01
+  shouldBeNear cl3.y 105 0.01
+
 #generate_tests
 
 end TrellisTests

@@ -72,6 +72,7 @@ structure FlexContainer where
   alignContent : AlignContent := .stretch
   gap : Length := 0          -- Gap between items on main axis
   rowGap : Length := 0       -- Gap between lines on cross axis (when wrapped)
+  marginCollapse : Bool := false  -- Enable CSS margin collapsing (column only)
 deriving Repr, BEq, Inhabited
 
 namespace FlexContainer

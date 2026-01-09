@@ -69,6 +69,20 @@ def unfrozenCount (line : FlexLine) : Nat :=
 
 end FlexLine
 
+/-! ## Margin Collapse -/
+
+/-- Calculate collapsed margin between two adjacent margins per CSS rules.
+    - Both positive: max(m1, m2)
+    - Both negative: min(m1, m2) (more negative wins)
+    - Mixed: m1 + m2 (algebraic sum) -/
+def collapseMargins (margin1 margin2 : Length) : Length :=
+  if margin1 >= 0 && margin2 >= 0 then
+    max margin1 margin2
+  else if margin1 < 0 && margin2 < 0 then
+    min margin1 margin2
+  else
+    margin1 + margin2
+
 /-! ## Phase 2: Collect Flex Items -/
 
 /-- Resolve flex-basis for an item. -/
@@ -370,15 +384,39 @@ def resolveCrossSizes (line : FlexLine) (alignItems : AlignItems) : FlexLine :=
 
 /-! ## Phase 6: Main Axis Alignment (justify-content) -/
 
-/-- Compute main axis positions for items in a line. -/
+/-- Compute main axis positions for items in a line.
+    When marginCollapse is true and axis is vertical (column), adjacent vertical
+    margins are collapsed according to CSS rules. -/
 def computeMainPositions (items : Array FlexItemState)
     (justify : JustifyContent) (availableMain gap : Length)
-    (isReversed : Bool) : Array Length := Id.run do
+    (isReversed : Bool) (axis : AxisInfo) (marginCollapse : Bool) : Array Length := Id.run do
   let n := items.size
   if n == 0 then return #[]
 
+  -- Compute effective margins (with optional collapsing for column direction)
+  let shouldCollapse := marginCollapse && !axis.isHorizontal
+  let effectiveMargins : Array (Length × Length) := Id.run do
+    let mut result : Array (Length × Length) := #[]
+    for i in [:n] do
+      let item := items[i]!
+      let startMargin := axis.mainStart item.margin
+      let endMargin := axis.mainEnd item.margin
+      if shouldCollapse && i > 0 then
+        -- Collapse this item's start margin with previous item's end margin
+        let prevEnd := axis.mainEnd items[i - 1]!.margin
+        let collapsed := collapseMargins prevEnd startMargin
+        -- Previous item gets 0 end margin, this item gets the collapsed margin
+        result := result.push (collapsed, endMargin)
+      else
+        result := result.push (startMargin, endMargin)
+    -- When collapsing, set end margins to 0 for all but last item
+    if shouldCollapse && n > 1 then
+      result := result.mapIdx fun i (start, end_) =>
+        if i < n - 1 then (start, 0) else (start, end_)
+    result
+
   let totalItemSize := items.foldl (fun acc i => acc + i.resolvedMainSize) 0
-  let totalMargins := items.foldl (fun acc i => acc + i.margin.horizontal) 0
+  let totalMargins := effectiveMargins.foldl (fun acc (start, end_) => acc + start + end_) 0
   let totalGaps := gap * (n - 1).toFloat
   let usedSpace := totalItemSize + totalMargins + totalGaps
   let freeSpace := availableMain - usedSpace
@@ -400,9 +438,11 @@ def computeMainPositions (items : Array FlexItemState)
   let mut positions : Array Length := #[]
   let mut currentPos := startOffset
 
-  for item in items do
-    positions := positions.push (currentPos + item.margin.left)
-    currentPos := currentPos + item.margin.horizontal + item.resolvedMainSize + itemGap
+  for i in [:n] do
+    let item := items[i]!
+    let (startMargin, endMargin) := effectiveMargins[i]!
+    positions := positions.push (currentPos + startMargin)
+    currentPos := currentPos + startMargin + endMargin + item.resolvedMainSize + itemGap
 
   if isReversed then
     -- Reverse positions relative to available space
@@ -569,7 +609,7 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
     -- Phase 6: Main axis positions
     let mainPositions := computeMainPositions line.items
                          container.justifyContent availableMain
-                         container.gap axis.isReversed
+                         container.gap axis.isReversed axis container.marginCollapse
 
     -- Phase 7: Cross axis positions
     let crossPositions := computeCrossPositions line.items
