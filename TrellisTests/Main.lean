@@ -1948,6 +1948,50 @@ test "margin collapse: three items chain collapse" := do
   shouldBeNear cl2.y 50 0.01
   shouldBeNear cl3.y 105 0.01
 
+/-! ## Flex Order Tests -/
+
+test "flex order: items reordered by order property" := do
+  let props := FlexContainer.row
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf' 1 50 30 {} (.flexChild { order := 2 }),
+    LayoutNode.leaf' 2 50 30 {} (.flexChild { order := 0 }),
+    LayoutNode.leaf' 3 50 30 {} (.flexChild { order := 1 })
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Visual order: 2 (order=0), 3 (order=1), 1 (order=2)
+  shouldSatisfy (cl2.x < cl3.x) "item 2 should be leftmost"
+  shouldSatisfy (cl3.x < cl1.x) "item 3 should be middle"
+
+test "flex order: equal order preserves source order" := do
+  let props := FlexContainer.row
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf' 1 50 30 {} (.flexChild { order := 0 }),
+    LayoutNode.leaf' 2 50 30 {} (.flexChild { order := 0 }),
+    LayoutNode.leaf' 3 50 30 {} (.flexChild { order := 0 })
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  let cl3 := result.get! 3
+  -- Same order: maintain source order (1, 2, 3)
+  shouldSatisfy (cl1.x < cl2.x) "item 1 should be before item 2"
+  shouldSatisfy (cl2.x < cl3.x) "item 2 should be before item 3"
+
+test "flex order: negative order values" := do
+  let props := FlexContainer.row
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf' 1 50 30 {} (.flexChild { order := 0 }),
+    LayoutNode.leaf' 2 50 30 {} (.flexChild { order := -1 })
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl2 := result.get! 2
+  -- Item 2 with order=-1 should come before item 1 with order=0
+  shouldSatisfy (cl2.x < cl1.x) "item 2 should be before item 1"
+
 #generate_tests
 
 end TrellisTests

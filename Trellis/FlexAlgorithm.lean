@@ -15,6 +15,8 @@ namespace Trellis
 /-- Intermediate state for a flex item during layout computation. -/
 structure FlexItemState where
   node : LayoutNode
+  /-- Original index in children array (for stable sort by order). -/
+  sourceIndex : Nat
   /-- Outer margin. -/
   margin : EdgeInsets
   /-- Hypothetical main size (before flex grow/shrink). -/
@@ -98,7 +100,8 @@ def resolveFlexBasis (basis : Dimension) (contentMain : Length)
 def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
     (availableMain availableCross : Length) (getContentSize : LayoutNode → Length × Length) : Array FlexItemState := Id.run do
   let mut items : Array FlexItemState := #[]
-  for child in children do
+  for idx in [:children.size] do
+    let child := children[idx]!
     let flexProps := child.flexItem?.getD FlexItem.default
     let contentSize := getContentSize child
     let contentMain := axis.mainFromPair contentSize
@@ -134,6 +137,7 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
 
     items := items.push {
       node := child
+      sourceIndex := idx
       margin := box.margin
       hypotheticalMainSize := hypotheticalMain
       flexBaseSize := resolvedMain
@@ -582,6 +586,13 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
   -- Phase 2: Collect items
   let (flowChildren, absChildren) := partitionAbsoluteFlex children
   let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
+
+  -- Sort items by order (stable: items with same order keep source order)
+  let items := items.qsort fun a b =>
+    let orderA := a.node.flexItem?.map (·.order) |>.getD 0
+    let orderB := b.node.flexItem?.map (·.order) |>.getD 0
+    if orderA != orderB then orderA < orderB
+    else a.sourceIndex < b.sourceIndex
 
   -- Phase 3: Partition into lines
   let lines := partitionIntoLines items container.wrap availableMain container.gap

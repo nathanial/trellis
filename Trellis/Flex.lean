@@ -103,6 +103,7 @@ structure FlexItem where
   shrink : Float := 1        -- How much to shrink relative to siblings (1 = normal)
   basis : Dimension := .auto -- Initial main size before grow/shrink
   alignSelf : Option AlignItems := none  -- Override container's alignItems
+  order : Int := 0           -- Visual ordering (lower values first)
 deriving Repr, BEq, Inhabited
 
 namespace FlexItem
