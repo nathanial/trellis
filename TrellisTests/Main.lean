@@ -210,6 +210,23 @@ test "nested flex containers layout correctly" := do
   shouldBeNear clInner.x 50 0.01
   shouldBeNear clInner.width 150 0.01
 
+test "row nested in column uses intrinsic height" := do
+  let row := LayoutNode.row 2 #[
+    LayoutNode.leaf 3 (ContentSize.mk' 4 2),
+    LayoutNode.leaf 4 (ContentSize.mk' 5 3)
+  ]
+  let col := LayoutNode.column 0 #[
+    LayoutNode.leaf 1 (ContentSize.mk' 10 1),
+    row
+  ]
+  let result := layout col 20 5
+  let clRow := result.get! 2
+  let clChild1 := result.get! 3
+  let clChild2 := result.get! 4
+  shouldBeNear clRow.height 3 0.01
+  shouldBeNear clChild1.height 3 0.01
+  shouldBeNear clChild2.height 3 0.01
+
 /-! ## Edge Case Tests -/
 
 test "empty container produces no child layouts" := do

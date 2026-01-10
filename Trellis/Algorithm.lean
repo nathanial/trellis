@@ -18,11 +18,88 @@ namespace Trellis
 
 /-! ## Shared Utilities -/
 
-/-- Get the content size of a node. -/
-def getContentSize (node : LayoutNode) : Length × Length :=
+/-- Recursively measure the intrinsic size of a node from its content or children. -/
+partial def measureIntrinsicSize (node : LayoutNode) : Length × Length :=
   match node.content with
   | some cs => (cs.width, cs.height)
-  | none => (0, 0)  -- Containers measure children recursively
+  | none =>
+    if node.isLeaf then (0, 0)
+    else
+      match node.container with
+      | .flex props => measureFlexIntrinsic props node.children
+      | .grid props => measureGridIntrinsic props node.children
+      | .none => (0, 0)
+where
+  measureFlexIntrinsic (props : FlexContainer) (children : Array LayoutNode) : Length × Length :=
+    if children.isEmpty then
+      (0, 0)
+    else
+      let childSizes := children.map measureIntrinsicSize
+      let gapCount := (children.size - 1).toFloat
+      if props.direction.isHorizontal then
+        let width := childSizes.foldl (fun acc sz => acc + sz.1) 0 + props.gap * gapCount
+        let height := childSizes.foldl (fun acc sz => max acc sz.2) 0
+        (width, height)
+      else
+        let width := childSizes.foldl (fun acc sz => max acc sz.1) 0
+        let height := childSizes.foldl (fun acc sz => acc + sz.2) 0 + props.gap * gapCount
+        (width, height)
+
+  measureGridIntrinsic (props : GridContainer) (children : Array LayoutNode) : Length × Length := Id.run do
+    if children.isEmpty then
+      return (0, 0)
+
+    let childSizes := children.map measureIntrinsicSize
+    let areaRows := props.templateAreas.rowCount
+    let areaCols := props.templateAreas.colCount
+    let explicitRows :=
+      if areaRows > 0 then areaRows
+      else (getExpandedSizes props.templateRows 0 props.rowGap).size
+    let explicitCols :=
+      if areaCols > 0 then areaCols
+      else (getExpandedSizes props.templateColumns 0 props.columnGap).size
+
+    let childCount := children.size
+    let ceilDiv := fun (n d : Nat) => if d == 0 then 0 else (n + d - 1) / d
+
+    let (rowCount, colCount) := match props.autoFlow with
+      | .row | .rowDense =>
+        let colCount := if explicitCols > 0 then explicitCols
+          else if explicitRows > 0 then max 1 (ceilDiv childCount explicitRows)
+          else max 1 childCount
+        let rowCount := if explicitRows > 0 then max explicitRows (ceilDiv childCount colCount)
+          else max 1 (ceilDiv childCount colCount)
+        (rowCount, colCount)
+      | .column | .columnDense =>
+        let rowCount := if explicitRows > 0 then explicitRows
+          else if explicitCols > 0 then max 1 (ceilDiv childCount explicitCols)
+          else max 1 childCount
+        let colCount := if explicitCols > 0 then max explicitCols (ceilDiv childCount rowCount)
+          else max 1 (ceilDiv childCount rowCount)
+        (rowCount, colCount)
+
+    let mut rowHeights : Array Length := (List.replicate rowCount 0).toArray
+    let mut colWidths : Array Length := (List.replicate colCount 0).toArray
+
+    for idx in [:childCount] do
+      let size := childSizes[idx]!
+      let (rowIdx, colIdx) := match props.autoFlow with
+        | .row | .rowDense => (idx / colCount, idx % colCount)
+        | .column | .columnDense => (idx % rowCount, idx / rowCount)
+      if rowIdx < rowHeights.size then
+        rowHeights := rowHeights.set! rowIdx (max rowHeights[rowIdx]! size.2)
+      if colIdx < colWidths.size then
+        colWidths := colWidths.set! colIdx (max colWidths[colIdx]! size.1)
+
+    let rowGapCount := if rowCount > 0 then (rowCount - 1).toFloat else 0
+    let colGapCount := if colCount > 0 then (colCount - 1).toFloat else 0
+    let width := colWidths.foldl (· + ·) 0 + props.columnGap * colGapCount
+    let height := rowHeights.foldl (· + ·) 0 + props.rowGap * rowGapCount
+    return (width, height)
+
+/-- Get the content size of a node. -/
+def getContentSize (node : LayoutNode) : Length × Length :=
+  measureIntrinsicSize node
 
 /-! ## Main Layout Function -/
 
