@@ -22,6 +22,3 @@ lean_lib TrellisTests where
 @[test_driver]
 lean_exe trellis_tests where
   root := `TrellisTests.Main
-
-lean_exe trellis_perf_tests where
-  root := `TrellisTests.PerformanceTests

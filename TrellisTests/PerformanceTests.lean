@@ -252,6 +252,3 @@ test "perf: 10-level alternating flex/grid nesting" := do
 #generate_tests
 
 end TrellisTests.PerformanceTests
-
-open Crucible in
-def main : IO UInt32 := runAllSuites
