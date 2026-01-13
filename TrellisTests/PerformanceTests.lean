@@ -134,7 +134,7 @@ def buildFanOutTree (depth fanOut : Nat) : LayoutNode := Id.run do
     currentLevel := nextLevel
   return currentLevel[0]!
 
-/-! ## Deep Nesting Tests (stack-limited due to recursive algorithm) -/
+/-! ## Deep Nesting Tests (now unlimited depth with iterative algorithm) -/
 
 test "perf: 1000-level deep flex column" := do
   let node := buildDeepColumn 1000
@@ -159,6 +159,22 @@ test "perf: 10000-level deep flex column" := do
   let elapsed ← start.elapsed
   shouldBe result.layouts.size 10001
   IO.println s!"  [10000-level deep column: {elapsed}]"
+
+test "perf: 50000-level deep flex column" := do
+  let node := buildDeepColumn 50000
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 500 5000000)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 50001
+  IO.println s!"  [50000-level deep column: {elapsed}]"
+
+test "perf: 100000-level deep flex column" := do
+  let node := buildDeepColumn 100000
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 500 10000000)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 100001
+  IO.println s!"  [100000-level deep column: {elapsed}]"
 
 /-! ## Wide Fan-Out Tests (100x scale) -/
 

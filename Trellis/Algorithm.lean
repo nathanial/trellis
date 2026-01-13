@@ -2,9 +2,11 @@
   Trellis Layout Algorithm
   CSS Flexbox and Grid layout computation.
 
-  This module re-exports the layout algorithms from FlexAlgorithm and GridAlgorithm,
-  and provides the main entry point for layout computation.
+  This module provides iterative (stack-based) layout algorithms that can handle
+  arbitrarily deep nesting without stack overflow. Uses O(n) complexity by
+  pre-computing intrinsic sizes in a single pass.
 -/
+import Std.Data.HashMap
 import Trellis.Types
 import Trellis.Flex
 import Trellis.Grid
@@ -16,26 +18,70 @@ import Trellis.GridAlgorithm
 
 namespace Trellis
 
-/-! ## Shared Utilities -/
+/-! ## Iterative Intrinsic Size Measurement
 
-/-- Recursively measure the intrinsic size of a node from its content or children. -/
-partial def measureIntrinsicSize (node : LayoutNode) : Length × Length :=
-  match node.content with
-  | some cs => (cs.width, cs.height)
-  | none =>
-    if node.isLeaf then (0, 0)
-    else
-      match node.container with
-      | .flex props => measureFlexIntrinsic props node.children
-      | .grid props => measureGridIntrinsic props node.children
-      | .none => (0, 0)
+Uses explicit stack for post-order traversal to measure content sizes bottom-up.
+Pre-computes all sizes in a single O(n) pass.
+-/
+
+/-- Work item for iterative intrinsic size measurement. -/
+private inductive MeasureWorkItem where
+  /-- Visit node - push children first, then mark for combining. -/
+  | visit (node : LayoutNode)
+  /-- Combine children's sizes into parent's size. -/
+  | combine (node : LayoutNode)
+deriving Inhabited
+
+/-- Pre-compute intrinsic sizes for all nodes in the tree.
+    Returns a HashMap from node ID to (width, height).
+    Uses explicit stack to avoid stack overflow with deep nesting. -/
+def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Length) := Id.run do
+  let mut sizes : Std.HashMap Nat (Length × Length) := {}
+  let mut stack : Array MeasureWorkItem := #[.visit root]
+
+  while !stack.isEmpty do
+    let item := stack.back!
+    stack := stack.pop
+
+    match item with
+    | .visit node =>
+      -- Check if already computed (handles DAGs if any)
+      if sizes.contains node.id then
+        continue
+
+      -- Leaf with content - store directly
+      match node.content with
+      | some cs =>
+        sizes := sizes.insert node.id (cs.width, cs.height)
+      | none =>
+        if node.isLeaf then
+          sizes := sizes.insert node.id (0, 0)
+        else
+          -- Container: push combine task, then visit children
+          stack := stack.push (.combine node)
+          for child in node.children.reverse do
+            stack := stack.push (.visit child)
+
+    | .combine node =>
+      -- All children should be measured now, combine their sizes
+      let childSizes := node.children.map fun child =>
+        sizes.getD child.id (0, 0)
+
+      let size := match node.container with
+        | .flex props => measureFlexIntrinsic props childSizes node.children.size
+        | .grid props => measureGridIntrinsic props childSizes node.children.size
+        | .none => (0, 0)
+
+      sizes := sizes.insert node.id size
+
+  sizes
 where
-  measureFlexIntrinsic (props : FlexContainer) (children : Array LayoutNode) : Length × Length :=
-    if children.isEmpty then
+  measureFlexIntrinsic (props : FlexContainer) (childSizes : Array (Length × Length))
+      (childCount : Nat) : Length × Length :=
+    if childSizes.isEmpty then
       (0, 0)
     else
-      let childSizes := children.map measureIntrinsicSize
-      let gapCount := (children.size - 1).toFloat
+      let gapCount := if childCount > 0 then (childCount - 1).toFloat else 0
       if props.direction.isHorizontal then
         let width := childSizes.foldl (fun acc sz => acc + sz.1) 0 + props.gap * gapCount
         let height := childSizes.foldl (fun acc sz => max acc sz.2) 0
@@ -45,11 +91,11 @@ where
         let height := childSizes.foldl (fun acc sz => acc + sz.2) 0 + props.gap * gapCount
         (width, height)
 
-  measureGridIntrinsic (props : GridContainer) (children : Array LayoutNode) : Length × Length := Id.run do
-    if children.isEmpty then
+  measureGridIntrinsic (props : GridContainer) (childSizes : Array (Length × Length))
+      (childCount : Nat) : Length × Length := Id.run do
+    if childSizes.isEmpty then
       return (0, 0)
 
-    let childSizes := children.map measureIntrinsicSize
     let areaRows := props.templateAreas.rowCount
     let areaCols := props.templateAreas.colCount
     let explicitRows :=
@@ -59,7 +105,6 @@ where
       if areaCols > 0 then areaCols
       else (getExpandedSizes props.templateColumns 0 props.columnGap).size
 
-    let childCount := children.size
     let ceilDiv := fun (n d : Nat) => if d == 0 then 0 else (n + d - 1) / d
 
     let (rowCount, colCount) := match props.autoFlow with
@@ -82,14 +127,15 @@ where
     let mut colWidths : Array Length := (List.replicate colCount 0).toArray
 
     for idx in [:childCount] do
-      let size := childSizes[idx]!
-      let (rowIdx, colIdx) := match props.autoFlow with
-        | .row | .rowDense => (idx / colCount, idx % colCount)
-        | .column | .columnDense => (idx % rowCount, idx / rowCount)
-      if rowIdx < rowHeights.size then
-        rowHeights := rowHeights.set! rowIdx (max rowHeights[rowIdx]! size.2)
-      if colIdx < colWidths.size then
-        colWidths := colWidths.set! colIdx (max colWidths[colIdx]! size.1)
+      if h : idx < childSizes.size then
+        let size := childSizes[idx]
+        let (rowIdx, colIdx) := match props.autoFlow with
+          | .row | .rowDense => (idx / colCount, idx % colCount)
+          | .column | .columnDense => (idx % rowCount, idx / rowCount)
+        if rowIdx < rowHeights.size then
+          rowHeights := rowHeights.set! rowIdx (max rowHeights[rowIdx]! size.2)
+        if colIdx < colWidths.size then
+          colWidths := colWidths.set! colIdx (max colWidths[colIdx]! size.1)
 
     let rowGapCount := if rowCount > 0 then (rowCount - 1).toFloat else 0
     let colGapCount := if colCount > 0 then (colCount - 1).toFloat else 0
@@ -97,81 +143,104 @@ where
     let height := rowHeights.foldl (· + ·) 0 + props.rowGap * rowGapCount
     return (width, height)
 
+/-- Measure intrinsic size of a single node (traverses subtree).
+    For single-node queries. For bulk computation, use measureAllIntrinsicSizes. -/
+def measureIntrinsicSize (root : LayoutNode) : Length × Length :=
+  (measureAllIntrinsicSizes root).getD root.id (0, 0)
+
 /-- Get the content size of a node. -/
 def getContentSize (node : LayoutNode) : Length × Length :=
   measureIntrinsicSize node
 
-/-! ## Main Layout Function -/
+/-! ## Iterative Layout Algorithm
 
-/-- Layout a single node and its children recursively. -/
-partial def layoutNode (node : LayoutNode) (availableWidth availableHeight : Length)
-    (offsetX offsetY : Length := 0) : LayoutResult := Id.run do
-  let box := node.box
+Uses explicit stack for top-down traversal to compute layouts without recursion.
+Pre-computes all intrinsic sizes once for O(n) total complexity.
+-/
 
-  -- Resolve node dimensions
-  -- For containers with auto dimensions, use available space
-  -- For leaf nodes, use content size
-  let contentSize := getContentSize node
-  let isContainer := !node.isLeaf
-  let resolvedWidth := match box.width with
-    | .auto => if isContainer then availableWidth else contentSize.1
-    | dim => dim.resolve availableWidth contentSize.1
-  let resolvedHeight := match box.height with
-    | .auto => if isContainer then availableHeight else contentSize.2
-    | dim => dim.resolve availableHeight contentSize.2
-  -- Apply aspect-ratio if one dimension is auto
-  let (resolvedWidth, resolvedHeight) := applyAspectRatio resolvedWidth resolvedHeight
-    box.width.isAuto box.height.isAuto box.aspectRatio
-  let width := box.clampWidth resolvedWidth
-  let height := box.clampHeight resolvedHeight
+/-- Work item for iterative layout computation. -/
+private structure LayoutWorkItem where
+  node : LayoutNode
+  availableWidth : Length
+  availableHeight : Length
+  offsetX : Length
+  offsetY : Length
+  /-- Whether to add this node's own layout (true for root, false for children
+      since their layouts are already added by parent's layoutFlexContainer/layoutGridContainer) -/
+  addOwnLayout : Bool := true
+deriving Inhabited
 
-  -- Create layout for this node
-  let nodeRect := LayoutRect.mk' offsetX offsetY width height
-  let mut result := LayoutResult.empty.add (ComputedLayout.withPadding node.id nodeRect box.padding)
+/-- Iteratively layout a tree starting from the root.
+    Uses explicit stack to avoid stack overflow with deep nesting.
+    Pre-computes all intrinsic sizes once for O(n) total complexity. -/
+def layout (root : LayoutNode) (availableWidth availableHeight : Length) : LayoutResult := Id.run do
+  -- Pre-compute all intrinsic sizes in one O(n) pass
+  let allSizes := measureAllIntrinsicSizes root
 
-  -- Layout children based on container type
-  match node.container with
-  | .flex props =>
-    let childResult := layoutFlexContainer props node.children width height box.padding getContentSize
-    -- Translate child results by node position
-    let childResult := childResult.translate offsetX offsetY
-    result := result.merge childResult
+  -- Create lookup function that uses pre-computed sizes
+  let getSize : LayoutNode → Length × Length := fun node =>
+    allSizes.getD node.id (0, 0)
 
-    -- Recursively layout any container children
-    for child in node.children do
-      if !child.isLeaf then
-        if let some cl := childResult.get child.id then
-          let grandchildResult := layoutNode child cl.borderRect.width cl.borderRect.height
-                                  cl.borderRect.x cl.borderRect.y
-          -- Only add grandchildren (child is already in result)
-          for layout in grandchildResult.layouts do
-            if layout.nodeId != child.id then
-              result := result.add layout
+  let mut result : LayoutResult := LayoutResult.empty
+  let mut stack : Array LayoutWorkItem := #[⟨root, availableWidth, availableHeight, 0, 0, true⟩]
 
-  | .grid props =>
-    let childResult := layoutGridContainer props node.children width height box.padding getContentSize
-    let childResult := childResult.translate offsetX offsetY
-    result := result.merge childResult
+  while !stack.isEmpty do
+    let item := stack.back!
+    stack := stack.pop
+    let node := item.node
+    let box := node.box
 
-    -- Recursively layout any container children
-    for child in node.children do
-      if !child.isLeaf then
-        if let some cl := childResult.get child.id then
-          let grandchildResult := layoutNode child cl.borderRect.width cl.borderRect.height
-                                  cl.borderRect.x cl.borderRect.y
-          -- Only add grandchildren (child is already in result)
-          for layout in grandchildResult.layouts do
-            if layout.nodeId != child.id then
-              result := result.add layout
+    -- Resolve node dimensions using pre-computed sizes (O(1) lookup)
+    let contentSize := getSize node
+    let isContainer := !node.isLeaf
+    let resolvedWidth := match box.width with
+      | .auto => if isContainer then item.availableWidth else contentSize.1
+      | dim => dim.resolve item.availableWidth contentSize.1
+    let resolvedHeight := match box.height with
+      | .auto => if isContainer then item.availableHeight else contentSize.2
+      | dim => dim.resolve item.availableHeight contentSize.2
+    -- Apply aspect-ratio if one dimension is auto
+    let (resolvedWidth, resolvedHeight) := applyAspectRatio resolvedWidth resolvedHeight
+      box.width.isAuto box.height.isAuto box.aspectRatio
+    let width := box.clampWidth resolvedWidth
+    let height := box.clampHeight resolvedHeight
 
-  | .none =>
-    -- Leaf node, no children to layout
-    pure ()
+    -- Create layout for this node (only for root; children are added by parent's container layout)
+    if item.addOwnLayout then
+      let nodeRect := LayoutRect.mk' item.offsetX item.offsetY width height
+      result := result.add (ComputedLayout.withPadding node.id nodeRect box.padding)
+
+    -- Layout children based on container type
+    match node.container with
+    | .flex props =>
+      let childResult := layoutFlexContainer props node.children width height box.padding getSize
+      -- Translate child results by node position
+      let childResult := childResult.translate item.offsetX item.offsetY
+      result := result.merge childResult
+
+      -- Push non-leaf children onto stack (their layouts are already in childResult)
+      for child in node.children.reverse do
+        if !child.isLeaf then
+          if let some cl := childResult.get child.id then
+            stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
+                                 cl.borderRect.x, cl.borderRect.y, false⟩
+
+    | .grid props =>
+      let childResult := layoutGridContainer props node.children width height box.padding getSize
+      let childResult := childResult.translate item.offsetX item.offsetY
+      result := result.merge childResult
+
+      -- Push non-leaf children onto stack (their layouts are already in childResult)
+      for child in node.children.reverse do
+        if !child.isLeaf then
+          if let some cl := childResult.get child.id then
+            stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
+                                 cl.borderRect.x, cl.borderRect.y, false⟩
+
+    | .none =>
+      -- Leaf node, no children to layout
+      pure ()
 
   result
-
-/-- Main entry point: Layout a tree starting from the root. -/
-def layout (root : LayoutNode) (availableWidth availableHeight : Length) : LayoutResult :=
-  layoutNode root availableWidth availableHeight
 
 end Trellis
