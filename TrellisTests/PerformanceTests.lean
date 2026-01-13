@@ -1,7 +1,7 @@
 /-
   Performance / Stress Tests for Trellis CSS Layout Library
 
-  Tests large and complex layout trees to ensure the implementation
+  EXTREME EDITION - Tests massive layout trees to ensure the implementation
   handles extreme scale without crashing or hanging.
 -/
 
@@ -15,6 +15,12 @@ open Crucible
 open Trellis
 
 testSuite "Performance Tests"
+
+/-- Force strict evaluation of a pure computation by storing in a ref and reading back.
+    This defeats Lean's lazy evaluation so we can time pure computations. -/
+@[inline] def strictEval {α : Type} (x : α) : IO α := do
+  let ref ← IO.mkRef x
+  ref.get
 
 /-! ## Helper Functions -/
 
@@ -106,148 +112,190 @@ def buildAlternatingNested (depth itemsPerLevel : Nat) : LayoutNode := Id.run do
       current := LayoutNode.row level levelItems (gap := 5)
   return current
 
-/-! ## Deep Nesting Tests -/
+/-- Build a tree with fan-out at each level (exponential growth).
+    Each non-leaf node has `fanOut` children. -/
+def buildFanOutTree (depth fanOut : Nat) : LayoutNode := Id.run do
+  let mut nodeId := 0
+  let mut currentLevel : Array LayoutNode := #[]
+  -- Start with leaves at the bottom
+  let numLeaves := fanOut ^ depth
+  for _ in [:numLeaves] do
+    currentLevel := currentLevel.push (LayoutNode.leaf' nodeId 10 10)
+    nodeId := nodeId + 1
+  -- Build up through the levels
+  for _ in [:depth] do
+    let mut nextLevel : Array LayoutNode := #[]
+    let numContainers := currentLevel.size / fanOut
+    for c in [:numContainers] do
+      let start := c * fanOut
+      let children := currentLevel.extract start (start + fanOut)
+      nextLevel := nextLevel.push (LayoutNode.row nodeId children (gap := 2))
+      nodeId := nodeId + 1
+    currentLevel := nextLevel
+  return currentLevel[0]!
 
-test "perf: 100-level deep flex column" := do
-  let node := buildDeepColumn 100
-  let start ← Chronos.MonotonicTime.now
-  let result := layout node 500 10000
-  let elapsed ← start.elapsed
-  -- 100 containers + 1 leaf = 101 nodes
-  shouldBe result.layouts.size 101
-  IO.println s!"  [100-level deep column: {elapsed}]"
-
-test "perf: 500-level deep flex column" := do
-  let node := buildDeepColumn 500
-  let start ← Chronos.MonotonicTime.now
-  let result := layout node 500 50000
-  let elapsed ← start.elapsed
-  shouldBe result.layouts.size 501
-  IO.println s!"  [500-level deep column: {elapsed}]"
+/-! ## Deep Nesting Tests (stack-limited due to recursive algorithm) -/
 
 test "perf: 1000-level deep flex column" := do
   let node := buildDeepColumn 1000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 500 100000
+  let result ← strictEval (layout node 500 100000)
   let elapsed ← start.elapsed
   shouldBe result.layouts.size 1001
   IO.println s!"  [1000-level deep column: {elapsed}]"
 
-/-! ## Wide Fan-Out Tests -/
-
-test "perf: 100 flex items in row" := do
-  let node := buildWideRow 100
+test "perf: 5000-level deep flex column" := do
+  let node := buildDeepColumn 5000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 10000 100
-  let elapsed ← start.elapsed
-  -- 1 container + 100 leaves = 101 nodes
-  shouldBe result.layouts.size 101
-  IO.println s!"  [100 flex items in row: {elapsed}]"
-
-test "perf: 1000 flex items in row" := do
-  let node := buildWideRow 1000
-  let start ← Chronos.MonotonicTime.now
-  let result := layout node 100000 100
-  let elapsed ← start.elapsed
-  shouldBe result.layouts.size 1001
-  IO.println s!"  [1000 flex items in row: {elapsed}]"
-
-test "perf: 5000 flex items in row" := do
-  let node := buildWideRow 5000
-  let start ← Chronos.MonotonicTime.now
-  let result := layout node 500000 100
+  let result ← strictEval (layout node 500 500000)
   let elapsed ← start.elapsed
   shouldBe result.layouts.size 5001
-  IO.println s!"  [5000 flex items in row: {elapsed}]"
+  IO.println s!"  [5000-level deep column: {elapsed}]"
 
-/-! ## Flex Wrap Tests -/
-
-test "perf: 1000 items wrapping (10 items per line)" := do
-  -- Items are 50px wide with 5px gap, in 500px container
-  -- ~9 items per line, ~111 lines
-  let node := buildWrappingRow 1000 50
+test "perf: 10000-level deep flex column" := do
+  let node := buildDeepColumn 10000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 500 50000
+  let result ← strictEval (layout node 500 1000000)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 1001
-  IO.println s!"  [1000 items wrapping: {elapsed}]"
+  shouldBe result.layouts.size 10001
+  IO.println s!"  [10000-level deep column: {elapsed}]"
 
-test "perf: 5000 items wrapping (50 items per line)" := do
-  -- Items are 20px wide with 5px gap, in 1200px container
-  -- ~48 items per line, ~104 lines
-  let node := buildWrappingRow 5000 20
+/-! ## Wide Fan-Out Tests (100x scale) -/
+
+test "perf: 10000 flex items in row" := do
+  let node := buildWideRow 10000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 1200 50000
+  let result ← strictEval (layout node 1000000 100)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 5001
-  IO.println s!"  [5000 items wrapping: {elapsed}]"
+  shouldBe result.layouts.size 10001
+  IO.println s!"  [10000 flex items in row: {elapsed}]"
 
-/-! ## Flex Shrinkage Tests -/
-
-test "perf: 100 items with shrinkage overflow" := do
-  -- 100 items x 50px = 5000px content in 1000px container
-  let node := buildShrinkingRow 100 50
+test "perf: 100000 flex items in row" := do
+  let node := buildWideRow 100000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 1000 100
+  let result ← strictEval (layout node 10000000 100)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 101
-  IO.println s!"  [100 items shrinking: {elapsed}]"
+  shouldBe result.layouts.size 100001
+  IO.println s!"  [100000 flex items in row: {elapsed}]"
 
-test "perf: 500 items with shrinkage overflow" := do
-  -- 500 items x 30px = 15000px content in 2000px container
-  let node := buildShrinkingRow 500 30
+test "perf: 500000 flex items in row" := do
+  let node := buildWideRow 500000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 2000 100
+  let result ← strictEval (layout node 50000000 100)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 501
-  IO.println s!"  [500 items shrinking: {elapsed}]"
+  shouldBe result.layouts.size 500001
+  IO.println s!"  [500000 flex items in row: {elapsed}]"
 
-/-! ## Grid Layout Tests -/
+/-! ## Flex Wrap Tests (100x scale) -/
 
-test "perf: 10x10 grid (100 cells)" := do
-  let node := buildGrid 10 10
+test "perf: 100000 items wrapping" := do
+  -- Items are 50px wide with 5px gap, in 5000px container
+  -- ~91 items per line, ~1099 lines
+  let node := buildWrappingRow 100000 50
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 500 500
+  let result ← strictEval (layout node 5000 5000000)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 101
-  IO.println s!"  [10x10 grid: {elapsed}]"
+  shouldBe result.layouts.size 100001
+  IO.println s!"  [100000 items wrapping: {elapsed}]"
 
-test "perf: 50x50 grid (2500 cells)" := do
-  let node := buildGrid 50 50
+test "perf: 500000 items wrapping" := do
+  -- Items are 20px wide with 5px gap, in 12000px container
+  -- ~480 items per line, ~1042 lines
+  let node := buildWrappingRow 500000 20
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 2000 2000
+  let result ← strictEval (layout node 12000 5000000)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 2501
-  IO.println s!"  [50x50 grid: {elapsed}]"
+  shouldBe result.layouts.size 500001
+  IO.println s!"  [500000 items wrapping: {elapsed}]"
+
+/-! ## Flex Shrinkage Tests (100x scale) -/
+
+test "perf: 10000 items with shrinkage overflow" := do
+  -- 10000 items x 50px = 500000px content in 10000px container
+  let node := buildShrinkingRow 10000 50
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 10000 100)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 10001
+  IO.println s!"  [10000 items shrinking: {elapsed}]"
+
+test "perf: 50000 items with shrinkage overflow" := do
+  -- 50000 items x 30px = 1500000px content in 20000px container
+  let node := buildShrinkingRow 50000 30
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 20000 100)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 50001
+  IO.println s!"  [50000 items shrinking: {elapsed}]"
+
+/-! ## Grid Layout Tests (100x scale) -/
 
 test "perf: 100x100 grid (10000 cells)" := do
   let node := buildGrid 100 100
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 4000 4000
+  let result ← strictEval (layout node 5000 5000)
   let elapsed ← start.elapsed
   shouldBe result.layouts.size 10001
   IO.println s!"  [100x100 grid: {elapsed}]"
 
-/-! ## Mixed Layout Tests -/
-
-test "perf: grid of 100 flex containers with 50 items each" := do
-  -- 10 columns x 100 flex containers, each with 50 items
-  -- Total: 1 grid + 100 flex + 5000 leaves = 5101 nodes
-  let node := buildGridOfFlexContainers 10 100 50
+test "perf: 500x500 grid (250000 cells)" := do
+  let node := buildGrid 500 500
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 2000 5000
+  let result ← strictEval (layout node 20000 20000)
   let elapsed ← start.elapsed
-  shouldBe result.layouts.size 5101
-  IO.println s!"  [grid of 100 flex containers x 50 items: {elapsed}]"
+  shouldBe result.layouts.size 250001
+  IO.println s!"  [500x500 grid: {elapsed}]"
 
-test "perf: 10-level alternating flex/grid nesting" := do
-  let node := buildAlternatingNested 10 5
+test "perf: 1000x1000 grid (1000000 cells)" := do
+  let node := buildGrid 1000 1000
   let start ← Chronos.MonotonicTime.now
-  let result := layout node 1000 1000
+  let result ← strictEval (layout node 40000 40000)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 1000001
+  IO.println s!"  [1000x1000 grid (1M cells): {elapsed}]"
+
+/-! ## Mixed Layout Tests (100x scale) -/
+
+test "perf: grid of 1000 flex containers with 500 items each" := do
+  -- 20 columns x 1000 flex containers, each with 500 items
+  -- Total: 1 grid + 1000 flex + 500000 leaves = 501001 nodes
+  let node := buildGridOfFlexContainers 20 1000 500
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 20000 500000)
+  let elapsed ← start.elapsed
+  shouldBe result.layouts.size 501001
+  IO.println s!"  [grid of 1000 flex containers x 500 items: {elapsed}]"
+
+test "perf: 50-level alternating flex/grid nesting" := do
+  let node := buildAlternatingNested 50 10
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 10000 10000)
   let elapsed ← start.elapsed
   -- Verify layout completes and produces reasonable result
-  shouldSatisfy (result.layouts.size > 10) "should have multiple layouts"
-  IO.println s!"  [10-level alternating nested: {elapsed}]"
+  shouldSatisfy (result.layouts.size > 50) "should have multiple layouts"
+  IO.println s!"  [50-level alternating nested: {elapsed}]"
+
+/-! ## Exponential Fan-Out Tests -/
+
+test "perf: fan-out tree depth=8 fanout=4 (87K+ nodes)" := do
+  -- 4^8 = 65,536 leaves, plus internal nodes
+  -- Total nodes = sum of 4^i for i=0..8 = (4^9 - 1) / 3 = 87,381
+  let node := buildFanOutTree 8 4
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 10000 10000)
+  let elapsed ← start.elapsed
+  shouldSatisfy (result.layouts.size > 80000) "should have over 80K layouts"
+  IO.println s!"  [fan-out tree 4^8: {elapsed}]"
+
+test "perf: fan-out tree depth=10 fanout=4 (1.3M+ nodes)" := do
+  -- 4^10 = 1,048,576 leaves, plus internal nodes
+  -- Total nodes = sum of 4^i for i=0..10 = (4^11 - 1) / 3 = 1,398,101
+  let node := buildFanOutTree 10 4
+  let start ← Chronos.MonotonicTime.now
+  let result ← strictEval (layout node 100000 100000)
+  let elapsed ← start.elapsed
+  shouldSatisfy (result.layouts.size > 1000000) "should have over 1M layouts"
+  IO.println s!"  [fan-out tree 4^10: {elapsed}]"
 
 #generate_tests
 
