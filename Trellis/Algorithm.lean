@@ -49,15 +49,22 @@ def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Le
       if sizes.contains node.id then
         continue
 
-      -- Leaf with content - store directly
+      -- Store intrinsic size based on content or computed from children
       match node.content with
       | some cs =>
+        -- Node has pre-computed content size (e.g., from afferent's measureWidget)
         sizes := sizes.insert node.id (cs.width, cs.height)
+        -- IMPORTANT: Still visit children so their sizes are in the HashMap!
+        -- This is needed because layoutFlexContainer/layoutGridContainer call
+        -- getContentSize on children, which looks them up in the HashMap.
+        if !node.isLeaf then
+          for child in node.children.reverse do
+            stack := stack.push (.visit child)
       | none =>
         if node.isLeaf then
           sizes := sizes.insert node.id (0, 0)
         else
-          -- Container: push combine task, then visit children
+          -- Container without preset content: compute from children
           stack := stack.push (.combine node)
           for child in node.children.reverse do
             stack := stack.push (.visit child)
