@@ -3,6 +3,7 @@
   Output types from layout computation.
 -/
 import Trellis.Types
+import Std.Data.HashMap
 
 namespace Trellis
 
@@ -128,18 +129,20 @@ def height (cl : ComputedLayout) : Length := cl.borderRect.height
 
 end ComputedLayout
 
-/-- Complete layout result for a tree. -/
+/-- Complete layout result for a tree.
+    Uses both an array for iteration and a HashMap for O(1) lookups. -/
 structure LayoutResult where
   layouts : Array ComputedLayout
-deriving Repr, Inhabited
+  layoutMap : Std.HashMap Nat ComputedLayout := {}
+deriving Inhabited
 
 namespace LayoutResult
 
-def empty : LayoutResult := ⟨#[]⟩
+def empty : LayoutResult := ⟨#[], {}⟩
 
-/-- Find layout by node ID. -/
+/-- Find layout by node ID. O(1) HashMap lookup. -/
 def get (r : LayoutResult) (nodeId : Nat) : Option ComputedLayout :=
-  r.layouts.find? (·.nodeId == nodeId)
+  r.layoutMap.get? nodeId
 
 /-- Get layout, panicking if not found. -/
 def get! (r : LayoutResult) (nodeId : Nat) : ComputedLayout :=
@@ -147,21 +150,26 @@ def get! (r : LayoutResult) (nodeId : Nat) : ComputedLayout :=
   | some cl => cl
   | none => panic! s!"Layout not found for node {nodeId}"
 
-/-- Add a computed layout. -/
+/-- Add a computed layout. Maintains both array and HashMap. -/
 def add (r : LayoutResult) (cl : ComputedLayout) : LayoutResult :=
-  ⟨r.layouts.push cl⟩
+  ⟨r.layouts.push cl, r.layoutMap.insert cl.nodeId cl⟩
 
-/-- Merge with another result. -/
+/-- Merge with another result. Maintains both array and HashMap. -/
 def merge (r1 r2 : LayoutResult) : LayoutResult :=
-  ⟨r1.layouts ++ r2.layouts⟩
+  let mergedMap := r2.layouts.foldl (init := r1.layoutMap) fun m cl =>
+    m.insert cl.nodeId cl
+  ⟨r1.layouts ++ r2.layouts, mergedMap⟩
 
 /-- Get all rects for rendering. -/
 def allRects (r : LayoutResult) : Array LayoutRect :=
   r.layouts.map (·.borderRect)
 
-/-- Map over all layouts. -/
+/-- Map over all layouts. Maintains both array and HashMap. -/
 def map (r : LayoutResult) (f : ComputedLayout → ComputedLayout) : LayoutResult :=
-  ⟨r.layouts.map f⟩
+  let newLayouts := r.layouts.map f
+  let newMap := newLayouts.foldl (init := {}) fun m cl =>
+    m.insert cl.nodeId cl
+  ⟨newLayouts, newMap⟩
 
 /-- Translate all layouts by an offset. -/
 def translate (r : LayoutResult) (dx dy : Length) : LayoutResult :=
