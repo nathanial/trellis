@@ -538,6 +538,24 @@ def alignFlexLines (lines : Array FlexLine) (alignContent : AlignContent)
 
   positioned
 
+/-! ## Single-line Fast Path Helpers -/
+
+/-- Compute cross position for a single line, matching `alignFlexLines`. -/
+private def singleLineCrossPosition (alignContent : AlignContent)
+    (availableCross lineCrossSize : Length) (isWrapReverse : Bool := false) : Length :=
+  let freeSpace := availableCross - lineCrossSize
+  let startOffset := match alignContent with
+    | .flexStart | .stretch => 0.0
+    | .flexEnd => freeSpace
+    | .center => freeSpace / 2.0
+    | .spaceBetween => 0.0
+    | .spaceAround => freeSpace / 2.0
+    | .spaceEvenly => freeSpace / 2.0
+  if isWrapReverse then
+    availableCross - startOffset - lineCrossSize
+  else
+    startOffset
+
 /-! ## Absolute Positioning -/
 
 /-- Resolve an absolutely positioned child relative to the parent's content box. -/
@@ -598,6 +616,53 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
   -- Phase 2: Collect items
   let (flowChildren, absChildren) := partitionAbsoluteFlex children
+
+  -- Fast path: 0 or 1 flow child (avoids sorting, line partitioning, and extra passes)
+  if flowChildren.size <= 1 then
+    let mut result := LayoutResult.empty
+    if flowChildren.size == 1 then
+      let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
+      if items.size == 1 then
+        let usedMain := computeLineMainSpace items container.gap
+        let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
+        let mut line : FlexLine := {
+          items
+          usedMainSpace := usedMain
+          crossSize := crossSize
+          maxBaseline := maxBaseline
+        }
+        -- Resolve flexible lengths and line sizing
+        line := resolveFlexibleLengths line availableMain container.gap
+        let lineCrossSize :=
+          if container.alignContent == .stretch then availableCross else line.crossSize
+        let isWrapReverse := container.wrap == .wrapReverse
+        let lineCrossPos :=
+          singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
+        line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
+        line := resolveCrossSizes line container.alignItems axis
+
+        -- Positions for the single item
+        let mainPositions := computeMainPositions line.items
+          container.justifyContent availableMain
+          container.gap axis.isReversed axis container.marginCollapse
+        let crossPositions := computeCrossPositions line.items
+          container.alignItems line.crossSize line.maxBaseline
+
+        let item := line.items[0]!
+        let mainPos := mainPositions[0]! + axis.mainStart padding
+        let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
+        let (x, y) := axis.toXY mainPos crossPos
+        let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
+        let rect := LayoutRect.mk' x y width height
+        result := result.add (ComputedLayout.simple item.node.id rect)
+
+    -- Absolute positioned children (do not affect layout flow)
+    for child in absChildren do
+      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+      result := result.add (ComputedLayout.simple child.id rect)
+
+    return result
+
   let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
 
   -- Sort items by order (stable: items with same order keep source order)

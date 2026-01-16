@@ -221,26 +221,39 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
     match node.container with
     | .flex props =>
       let childResult := layoutFlexContainer props node.children width height box.padding getSize
-      -- Translate child results by node position
-      let childResult := childResult.translate item.offsetX item.offsetY
-      result := result.merge childResult
+      let translateLayout := fun (cl : ComputedLayout) =>
+        { cl with
+          borderRect := cl.borderRect.translate item.offsetX item.offsetY
+          contentRect := cl.contentRect.translate item.offsetX item.offsetY
+        }
+      -- Add translated child layouts directly to avoid translate/merge allocations
+      for cl in childResult.layouts do
+        result := result.add (translateLayout cl)
 
       -- Push non-leaf children onto stack (their layouts are already in childResult)
       for child in node.children.reverse do
         if !child.isLeaf then
           if let some cl := childResult.get child.id then
+            let cl := translateLayout cl
             stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
                                  cl.borderRect.x, cl.borderRect.y, false⟩
 
     | .grid props =>
       let childResult := layoutGridContainer props node.children width height box.padding getSize
-      let childResult := childResult.translate item.offsetX item.offsetY
-      result := result.merge childResult
+      let translateLayout := fun (cl : ComputedLayout) =>
+        { cl with
+          borderRect := cl.borderRect.translate item.offsetX item.offsetY
+          contentRect := cl.contentRect.translate item.offsetX item.offsetY
+        }
+      -- Add translated child layouts directly to avoid translate/merge allocations
+      for cl in childResult.layouts do
+        result := result.add (translateLayout cl)
 
       -- Push non-leaf children onto stack (their layouts are already in childResult)
       for child in node.children.reverse do
         if !child.isLeaf then
           if let some cl := childResult.get child.id then
+            let cl := translateLayout cl
             stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
                                  cl.borderRect.x, cl.borderRect.y, false⟩
 
