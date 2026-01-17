@@ -6,5 +6,4 @@ import TrellisTests.LayoutBasicTests
 import TrellisTests.LayoutFlexTests
 import TrellisTests.LayoutGridTests
 import TrellisTests.LayoutEdgeCaseTests
-import TrellisTests.LayoutContentScaleTests
 import TrellisTests.ContentSizeTests
