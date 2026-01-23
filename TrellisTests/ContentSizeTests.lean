@@ -367,6 +367,6 @@ test "content: grid with preset content - children sized" := do
   shouldSatisfy (tl1.width > 0) "cell1 should have width"
   shouldSatisfy (tl2.width > 0) "cell2 should have width"
 
-#generate_tests
+
 
 end TrellisTests.ContentSizeTests

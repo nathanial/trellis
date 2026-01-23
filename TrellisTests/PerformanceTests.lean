@@ -313,6 +313,6 @@ test "perf: fan-out tree depth=10 fanout=4 (1.3M+ nodes)" := do
   shouldSatisfy (result.layouts.size > 1000000) "should have over 1M layouts"
   IO.println s!"  [fan-out tree 4^10: {elapsed}]"
 
-#generate_tests
+
 
 end TrellisTests.PerformanceTests

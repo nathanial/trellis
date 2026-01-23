@@ -353,6 +353,6 @@ test "aspect-ratio: 1:1 square" := do
   shouldBeNear cl.width 100 0.01
   shouldBeNear cl.height 100 0.01
 
-#generate_tests
+
 
 end TrellisTests.LayoutTests.Basic

@@ -398,6 +398,6 @@ test "margin collapse: three items chain collapse" := do
   shouldBeNear cl2.y 50 0.01
   shouldBeNear cl3.y 105 0.01
 
-#generate_tests
+
 
 end TrellisTests.LayoutTests.EdgeCases

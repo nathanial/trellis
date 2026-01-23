@@ -700,6 +700,6 @@ test "grid baseline: different rows have independent baselines" := do
   shouldBeNear cl1.y 0 0.01
   shouldSatisfy (cl2.y > cl1.y) "item 2 should be in second row"
 
-#generate_tests
+
 
 end TrellisTests.LayoutTests.Grid
