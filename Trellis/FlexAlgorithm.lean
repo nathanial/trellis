@@ -96,9 +96,25 @@ def resolveFlexBasis (basis : Dimension) (contentMain : Length)
   | .percent p => availableMain * p
   | .minContent | .maxContent => contentMain
 
-/-- Collect flex items from children with initial measurements. -/
+/-- Resolve a dimension when available size may be indefinite.
+    Percent resolves to content size when available is indefinite. -/
+def resolveDimensionOpt (dim : Dimension) (available? : Option Length) (content : Length) : Length :=
+  match dim, available? with
+  | .percent _, none => content
+  | _, some available => dim.resolve available content
+  | _, none => dim.resolve 0 content
+
+/-- Treat percentage as auto when available size is indefinite. -/
+def isAutoForIndefinite (dim : Dimension) (available? : Option Length) : Bool :=
+  match dim, available? with
+  | .percent _, none => true
+  | _, _ => dim.isAuto
+
+/-- Collect flex items from children with initial measurements.
+    When available cross size is indefinite, percentage cross sizes are treated as auto. -/
 def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
-    (availableMain availableCross : Length) (getContentSize : LayoutNode → Length × Length) : Array FlexItemState := Id.run do
+    (availableMain : Length) (availableCross? : Option Length)
+    (getContentSize : LayoutNode → Length × Length) : Array FlexItemState := Id.run do
   let mut items : Array FlexItemState := #[]
   for idx in [:children.size] do
     let child := children[idx]!
@@ -122,14 +138,15 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
 
     -- Resolve cross dimension if specified (supports percentage)
     let crossDim := axis.crossDimension box
-    let resolvedCross := crossDim.resolve availableCross contentCross
+    let resolvedCross := resolveDimensionOpt crossDim availableCross? contentCross
 
     -- Apply aspect-ratio (convert main/cross to width/height for ratio)
+    let crossIsAuto := isAutoForIndefinite crossDim availableCross?
     let (resolvedMain, resolvedCross) :=
       if axis.isHorizontal then
-        applyAspectRatio resolvedMain resolvedCross mainDim.isAuto crossDim.isAuto box.aspectRatio
+        applyAspectRatio resolvedMain resolvedCross mainDim.isAuto crossIsAuto box.aspectRatio
       else
-        let (w, h) := applyAspectRatio resolvedCross resolvedMain crossDim.isAuto mainDim.isAuto box.aspectRatio
+        let (w, h) := applyAspectRatio resolvedCross resolvedMain crossIsAuto mainDim.isAuto box.aspectRatio
         (h, w)
 
     -- Compute hypothetical sizes (clamped to constraints)
@@ -157,6 +174,14 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
       baseline := baseline
     }
   return items
+
+/-- Sort flex items by order, preserving source order for ties. -/
+def sortFlexItems (items : Array FlexItemState) : Array FlexItemState :=
+  items.qsort fun a b =>
+    let orderA := a.node.flexItem?.map (·.order) |>.getD 0
+    let orderB := b.node.flexItem?.map (·.order) |>.getD 0
+    if orderA != orderB then orderA < orderB
+    else a.sourceIndex < b.sourceIndex
 
 /-! ## Phase 3: Partition Into Lines -/
 
@@ -598,6 +623,36 @@ def partitionAbsoluteFlex (children : Array LayoutNode) : Array LayoutNode × Ar
       (flow.push child, abs)
   ) (#[], #[])
 
+/-- Measure cross-axis size for a flex container given a definite main size.
+    This avoids full layout and ignores align-content/align-items stretch. -/
+def measureFlexCrossSizeGivenMain (container : FlexContainer) (children : Array LayoutNode)
+    (availableMain : Length) (getContentSize : LayoutNode → Length × Length) : Length × Length := Id.run do
+  let axis := AxisInfo.fromDirection container.direction
+  let (flowChildren, _) := partitionAbsoluteFlex children
+  if flowChildren.isEmpty then
+    return (0, 0)
+
+  let items := collectFlexItems axis flowChildren availableMain none getContentSize
+  if items.isEmpty then
+    return (0, 0)
+
+  let items := sortFlexItems items
+  let lines := partitionIntoLines items container.wrap availableMain container.gap
+  if lines.isEmpty then
+    return (0, 0)
+
+  let totalCross := lines.foldl (fun acc line => acc + line.crossSize) 0
+  let gaps := container.rowGap * (lines.size - 1).toFloat
+  let cross := totalCross + gaps
+
+  let baseline :=
+    if container.wrap == .wrapReverse then
+      lines[lines.size - 1]!.maxBaseline
+    else
+      lines[0]!.maxBaseline
+
+  (cross, baseline)
+
 /-! ## Main Flex Layout Function -/
 
 /-- Layout a flex container. -/
@@ -621,7 +676,7 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
   if flowChildren.size <= 1 then
     let mut result := LayoutResult.empty
     if flowChildren.size == 1 then
-      let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
+      let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
       if items.size == 1 then
         let usedMain := computeLineMainSpace items container.gap
         let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
@@ -663,14 +718,10 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
     return result
 
-  let items := collectFlexItems axis flowChildren availableMain availableCross getContentSize
+  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
 
   -- Sort items by order (stable: items with same order keep source order)
-  let items := items.qsort fun a b =>
-    let orderA := a.node.flexItem?.map (·.order) |>.getD 0
-    let orderB := b.node.flexItem?.map (·.order) |>.getD 0
-    if orderA != orderB then orderA < orderB
-    else a.sourceIndex < b.sourceIndex
+  let items := sortFlexItems items
 
   -- Phase 3: Partition into lines
   let lines := partitionIntoLines items container.wrap availableMain container.gap

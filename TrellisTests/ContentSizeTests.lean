@@ -110,6 +110,37 @@ test "content: button row - multiple buttons sized by their labels" := do
   shouldBeNear tl2.width 80 0.01
   shouldBeNear tl3.width 55 0.01
 
+test "content: flex container intrinsic includes padding" := do
+  -- Padded flex container should report content size including padding
+  let text := LayoutNode.leaf 2 (ContentSize.mk' 50 20)
+  let padded := LayoutNode.row 1 #[text] (box := {
+    padding := Trellis.EdgeInsets.symmetric 10 5
+  })
+  let parentProps := { FlexContainer.row with alignItems := .flexStart }
+  let parent := LayoutNode.flexBox 0 parentProps #[padded]
+  let result := layout parent 200 100
+  let paddedLayout := result.get! 1
+  -- Width = content 50 + horizontal padding 20
+  shouldBeNear paddedLayout.width 70 0.01
+  -- Height = content 20 + vertical padding 10
+  shouldBeNear paddedLayout.height 30 0.01
+
+test "content: grid container intrinsic includes padding" := do
+  -- Padded grid container should report content size including padding
+  let cell := LayoutNode.leaf 2 (ContentSize.mk' 40 30)
+  let gridProps := GridContainer.withTemplate #[.auto] #[.auto]
+  let paddedGrid := LayoutNode.gridBox 1 gridProps #[cell] (box := {
+    padding := Trellis.EdgeInsets.symmetric 6 4
+  })
+  let parentProps := { FlexContainer.row with alignItems := .flexStart }
+  let parent := LayoutNode.flexBox 0 parentProps #[paddedGrid]
+  let result := layout parent 200 100
+  let gridLayout := result.get! 1
+  -- Width = content 40 + horizontal padding 12
+  shouldBeNear gridLayout.width 52 0.01
+  -- Height = content 30 + vertical padding 8
+  shouldBeNear gridLayout.height 38 0.01
+
 /-! ## Cards with Content-Sized Children
 
 Cards contain various content elements that should size based on their content.

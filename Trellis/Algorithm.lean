@@ -74,9 +74,10 @@ def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Le
       let childSizes := node.children.map fun child =>
         sizes.getD child.id (0, 0)
 
+      let padding := node.box.padding
       let size := match node.container with
-        | .flex props => measureFlexIntrinsic props childSizes node.children.size
-        | .grid props => measureGridIntrinsic props childSizes node.children.size
+        | .flex props => measureFlexIntrinsic props childSizes node.children.size padding
+        | .grid props => measureGridIntrinsic props childSizes node.children.size padding
         | .none => (0, 0)
 
       sizes := sizes.insert node.id size
@@ -84,24 +85,24 @@ def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Le
   sizes
 where
   measureFlexIntrinsic (props : FlexContainer) (childSizes : Array (Length × Length))
-      (childCount : Nat) : Length × Length :=
+      (childCount : Nat) (padding : EdgeInsets) : Length × Length :=
     if childSizes.isEmpty then
-      (0, 0)
+      (padding.horizontal, padding.vertical)
     else
       let gapCount := if childCount > 0 then (childCount - 1).toFloat else 0
       if props.direction.isHorizontal then
         let width := childSizes.foldl (fun acc sz => acc + sz.1) 0 + props.gap * gapCount
         let height := childSizes.foldl (fun acc sz => max acc sz.2) 0
-        (width, height)
+        (width + padding.horizontal, height + padding.vertical)
       else
         let width := childSizes.foldl (fun acc sz => max acc sz.1) 0
         let height := childSizes.foldl (fun acc sz => acc + sz.2) 0 + props.gap * gapCount
-        (width, height)
+        (width + padding.horizontal, height + padding.vertical)
 
   measureGridIntrinsic (props : GridContainer) (childSizes : Array (Length × Length))
-      (childCount : Nat) : Length × Length := Id.run do
+      (childCount : Nat) (padding : EdgeInsets) : Length × Length := Id.run do
     if childSizes.isEmpty then
-      return (0, 0)
+      return (padding.horizontal, padding.vertical)
 
     let areaRows := props.templateAreas.rowCount
     let areaCols := props.templateAreas.colCount
@@ -148,7 +149,7 @@ where
     let colGapCount := if colCount > 0 then (colCount - 1).toFloat else 0
     let width := colWidths.foldl (· + ·) 0 + props.columnGap * colGapCount
     let height := rowHeights.foldl (· + ·) 0 + props.rowGap * rowGapCount
-    return (width, height)
+    return (width + padding.horizontal, height + padding.vertical)
 
 /-- Measure intrinsic size of a single node (traverses subtree).
     For single-node queries. For bulk computation, use measureAllIntrinsicSizes. -/

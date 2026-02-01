@@ -496,16 +496,15 @@ def remeasureWrappedFlexItems (items : Array GridItemState) (colTracks : Array R
     let item := items[i]!
     if isWrappedHorizontalFlex item.node then
       let availWidth := computeItemWidthFromTracks item colTracks columnGap
-      -- Run actual flex layout to get the real height
       match item.node.flexContainer? with
       | some flexProps =>
-        let flexResult := layoutFlexContainer flexProps item.node.children
-          availWidth 10000  -- Large height, we only care about resulting height
-          {} getContentSize
-        -- Extract the actual height from the flex layout result
-        let actualHeight := flexResult.layouts.foldl (fun acc cl =>
-          max acc (cl.borderRect.y + cl.borderRect.height)) 0
-        result := result.set! i { item with contentHeight := actualHeight }
+        let padding := item.node.box.padding
+        let contentWidth := max 0 (availWidth - padding.horizontal)
+        let (contentHeight, baseline) :=
+          measureFlexCrossSizeGivenMain flexProps item.node.children contentWidth getContentSize
+        let totalHeight := contentHeight + padding.vertical
+        let totalBaseline := padding.top + baseline
+        result := result.set! i { item with contentHeight := totalHeight, baseline := totalBaseline }
       | none => pure ()
   result
 

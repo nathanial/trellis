@@ -749,5 +749,281 @@ test "grid auto row sizes correctly for wrapped flex child" := do
   shouldSatisfy (contentLayout.y >= tabBarLayout.y + tabBarLayout.height)
     "content should not overlap with tab bar"
 
+test "grid auto row sizes correctly for wrapped flex child with padding" := do
+  -- Same as above, but the tab bar has padding that should be included in its height
+  let gridProps := GridContainer.withTemplate
+    #[.auto, .fixed (.length 1.0), .fr 1]
+    #[.fr 1]
+  let flexProps : FlexContainer := {
+    direction := .row
+    wrap := .wrap
+    gap := 0
+    rowGap := 0
+  }
+  -- Tab bar: 4 tabs, each 60x30; wraps to 2 lines in 200px width
+  -- Padding vertical = 12px (6 top + 6 bottom), so total height = 60 + 12 = 72
+  let tabBar := LayoutNode.flexBox 1 flexProps #[
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 5 (ContentSize.mk' 60 30)
+  ] (box := { padding := Trellis.EdgeInsets.symmetric 8 6 })
+  let divider := LayoutNode.leaf 6 (ContentSize.mk' 0 1)
+  let content := LayoutNode.leaf 7 (ContentSize.mk' 0 50)
+
+  let node := LayoutNode.gridBox 0 gridProps #[tabBar, divider, content]
+  let result := layout node 200 200
+
+  let tabBarLayout := result.get! 1
+  let dividerLayout := result.get! 6
+  let contentLayout := result.get! 7
+
+  shouldBeNear tabBarLayout.height 72 0.01
+  shouldBeNear dividerLayout.y 72 0.01
+  shouldBeNear contentLayout.y 73 0.01
+  shouldSatisfy (contentLayout.y >= tabBarLayout.y + tabBarLayout.height)
+    "content should not overlap with padded tab bar"
+
+test "nested layout: column containing grid with wrapped flex and nested flex content" := do
+  -- This mimics the ReactiveShowcase structure:
+  -- Root: flex column
+  --   - Title (leaf)
+  --   - TabView-like grid (fills remaining space)
+  --     - Row 0 (auto): wrapped flex tab bar
+  --     - Row 1 (1px): divider
+  --     - Row 2 (fr): content panel (flex column containing flex rows)
+
+  -- Tab bar: wrapped horizontal flex with 8 tabs
+  let tabBarProps : FlexContainer := {
+    direction := .row
+    wrap := .wrap
+    gap := 4
+    rowGap := 4
+  }
+  let tabBar := LayoutNode.flexBox 10 tabBarProps #[
+    LayoutNode.leaf 11 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 12 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 13 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 14 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 15 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 16 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 17 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 18 (ContentSize.mk' 80 30)
+  ]
+
+  -- Divider
+  let divider := LayoutNode.leaf 20 (ContentSize.mk' 0 1)
+
+  -- Content panel: flex column containing a flex row with two columns
+  let leftCol := LayoutNode.column 31 #[
+    LayoutNode.leaf 32 (ContentSize.mk' 100 40),
+    LayoutNode.leaf 33 (ContentSize.mk' 100 40)
+  ] (gap := 8)
+
+  let rightCol := LayoutNode.column 41 #[
+    LayoutNode.leaf 42 (ContentSize.mk' 100 40),
+    LayoutNode.leaf 43 (ContentSize.mk' 100 40)
+  ] (gap := 8)
+
+  let contentRow := LayoutNode.row 30 #[leftCol, rightCol] (gap := 16)
+  let contentPanel := LayoutNode.column 21 #[contentRow] (gap := 0)
+
+  -- TabView-like grid
+  let gridProps := GridContainer.withTemplate
+    #[.auto, .fixed (.length 1.0), .fr 1]
+    #[.fr 1]
+  let tabViewGrid := LayoutNode.gridBox 2 gridProps #[tabBar, divider, contentPanel]
+
+  -- Title
+  let title := LayoutNode.leaf 1 (ContentSize.mk' 200 30)
+
+  -- Root column
+  let root := LayoutNode.column 0 #[title, tabViewGrid] (gap := 16)
+
+  -- Layout in a 500x400 container
+  -- 8 tabs of 80px + gaps: 8*80 + 7*4 = 668px > 500px, so tabs will wrap
+  let result := layout root 500 400
+
+  let titleLayout := result.get! 1
+  let gridLayout := result.get! 2
+  let tabBarLayout := result.get! 10
+  let dividerLayout := result.get! 20
+  let contentPanelLayout := result.get! 21
+  let contentRowLayout := result.get! 30
+  let leftColLayout := result.get! 31
+  let rightColLayout := result.get! 41
+
+  -- Title should be at top
+  shouldBeNear titleLayout.y 0 0.01
+  shouldBeNear titleLayout.height 30 0.01
+
+  -- Grid should start after title + gap
+  shouldBeNear gridLayout.y 46 0.01  -- 30 + 16
+
+  -- Tab bar: 8 tabs of 80px + 7*4px gaps = 668px
+  -- In 500px width: first line fits ~5 tabs (5*80 + 4*4 = 416), second line has 3 tabs
+  -- Actually: 80+4+80+4+80+4+80+4+80 = 416, then 80+4+80+4+80 = 252
+  -- So 5 tabs on first line, 3 on second = 2 lines of 30px each + 4px rowGap = 64px
+  shouldBeNear tabBarLayout.height 64 0.01
+
+  -- Divider should be after tab bar
+  shouldBeNear dividerLayout.y (tabBarLayout.y + tabBarLayout.height) 0.01
+
+  -- Content panel should be after divider
+  shouldBeNear contentPanelLayout.y (dividerLayout.y + 1) 0.01
+
+  -- Content panel should have positive height (not zero or negative)
+  shouldSatisfy (contentPanelLayout.height > 50) "content panel should have reasonable height"
+
+  -- Content row should render within content panel
+  shouldSatisfy (contentRowLayout.y >= contentPanelLayout.y)
+    "content row should be within content panel"
+
+  -- Left and right columns should both be visible (non-zero width)
+  shouldSatisfy (leftColLayout.width > 0) "left column should have width"
+  shouldSatisfy (rightColLayout.width > 0) "right column should have width"
+
+  -- Columns should be side by side
+  shouldSatisfy (rightColLayout.x > leftColLayout.x) "right column should be to the right of left"
+
+  -- Nested leaves should be positioned correctly
+  let leaf32 := result.get! 32
+  let leaf42 := result.get! 42
+  shouldSatisfy (leaf32.width > 0) "nested leaf in left column should have width"
+  shouldSatisfy (leaf42.width > 0) "nested leaf in right column should have width"
+
+test "nested grids with wrapped flex: TabView inside TabView" := do
+  -- This mimics the actual afferent-demos structure:
+  -- Main TabView (grid) containing ReactiveShowcase TabView (grid) containing tabViewPanel's TabView (grid)
+  -- All three have wrapped flex tab bars in their first row
+  -- IMPORTANT: TabViews have flexItem := growing 1 to fill available space
+
+  let growingItem : ItemKind := .flexChild (FlexItem.growing 1)
+
+  -- Inner TabView (like tabViewPanel's demo TabView)
+  let innerTabBarProps : FlexContainer := { direction := .row, wrap := .wrap, gap := 4, rowGap := 4 }
+  let innerTabBar := LayoutNode.flexBox 300 innerTabBarProps #[
+    LayoutNode.leaf 301 (ContentSize.mk' 70 25),
+    LayoutNode.leaf 302 (ContentSize.mk' 70 25),
+    LayoutNode.leaf 303 (ContentSize.mk' 70 25)
+  ]
+  let innerDivider := LayoutNode.leaf 310 (ContentSize.mk' 0 1)
+  let innerContent := LayoutNode.leaf 320 (ContentSize.mk' 50 40)
+  let innerGridProps := GridContainer.withTemplate #[.auto, .fixed (.length 1.0), .fr 1] #[.fr 1]
+  let innerTabView := LayoutNode.gridBox 200 innerGridProps #[innerTabBar, innerDivider, innerContent] {} growingItem
+
+  -- Middle TabView (like ReactiveShowcase's TabView)
+  -- Its content area contains the inner TabView
+  let middleTabBarProps : FlexContainer := { direction := .row, wrap := .wrap, gap := 4, rowGap := 4 }
+  let middleTabBar := LayoutNode.flexBox 110 middleTabBarProps #[
+    LayoutNode.leaf 111 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 112 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 113 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 114 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 115 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 116 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 117 (ContentSize.mk' 80 30),
+    LayoutNode.leaf 118 (ContentSize.mk' 80 30)
+  ]
+  let middleDivider := LayoutNode.leaf 120 (ContentSize.mk' 0 1)
+  -- Content panel contains a column with the inner TabView (column also grows)
+  let middleContentInner := LayoutNode.column 130 #[innerTabView] (gap := 8) {} growingItem
+  let middleGridProps := GridContainer.withTemplate #[.auto, .fixed (.length 1.0), .fr 1] #[.fr 1]
+  let middleTabView := LayoutNode.gridBox 100 middleGridProps #[middleTabBar, middleDivider, middleContentInner] {} growingItem
+
+  -- Outer TabView (like main app's TabView)
+  let outerTabBarProps : FlexContainer := { direction := .row, wrap := .wrap, gap := 4, rowGap := 4 }
+  let outerTabBar := LayoutNode.flexBox 11 outerTabBarProps #[
+    LayoutNode.leaf 12 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 13 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 14 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 15 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 16 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 17 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 18 (ContentSize.mk' 70 30),
+    LayoutNode.leaf 19 (ContentSize.mk' 70 30)
+  ]
+  let outerDivider := LayoutNode.leaf 20 (ContentSize.mk' 0 1)
+  -- Content contains the middle TabView (column also grows)
+  let outerContentInner := LayoutNode.column 30 #[middleTabView] (gap := 8) {} growingItem
+  let outerGridProps := GridContainer.withTemplate #[.auto, .fixed (.length 1.0), .fr 1] #[.fr 1]
+  let outerTabView := LayoutNode.gridBox 10 outerGridProps #[outerTabBar, outerDivider, outerContentInner] {} growingItem
+
+  -- Root column
+  let root := LayoutNode.column 0 #[
+    LayoutNode.leaf 1 (ContentSize.mk' 100 30),  -- Title
+    outerTabView
+  ] (gap := 16)
+
+  -- Layout in 500x600 container
+  let result := layout root 500 600
+
+  -- Check outer TabView
+  let outerTabBarLayout := result.get! 11
+  let outerDividerLayout := result.get! 20
+  let outerContentLayout := result.get! 30
+
+  -- Outer tab bar should wrap (8 tabs x 70px = 560 > 500)
+  shouldSatisfy (outerTabBarLayout.height > 30) "outer tab bar should wrap to multiple lines"
+
+  -- Outer divider should be after outer tab bar
+  shouldBeNear outerDividerLayout.y (outerTabBarLayout.y + outerTabBarLayout.height) 1.0
+
+  -- Outer content should be after outer divider
+  shouldSatisfy (outerContentLayout.y > outerDividerLayout.y)
+    "outer content should be below outer divider"
+
+  -- Check middle TabView
+  let middleTabViewLayout := result.get! 100
+  let middleTabBarLayout := result.get! 110
+  let middleDividerLayout := result.get! 120
+  let middleContentLayout := result.get! 130
+
+  -- Middle TabView should be positioned within outer content
+  shouldSatisfy (middleTabViewLayout.y >= outerContentLayout.y)
+    "middle TabView should be within outer content area"
+
+  -- Middle tab bar should also wrap
+  shouldSatisfy (middleTabBarLayout.height > 30) "middle tab bar should wrap to multiple lines"
+
+  -- Middle content should be after middle divider (not overlapping)
+  shouldSatisfy (middleContentLayout.y > middleDividerLayout.y)
+    "middle content should be below middle divider"
+
+  -- Check inner TabView
+  let innerTabViewLayout := result.get! 200
+  let innerTabBarLayout := result.get! 300
+  let innerDividerLayout := result.get! 310
+  let innerContentLayout := result.get! 320
+
+  -- Inner TabView should be within middle content
+  shouldSatisfy (innerTabViewLayout.y >= middleContentLayout.y)
+    "inner TabView should be within middle content area"
+
+  -- Inner content should be after inner divider (not overlapping)
+  shouldSatisfy (innerContentLayout.y > innerDividerLayout.y)
+    "inner content should be below inner divider"
+
+  -- Debug: print all the heights
+  IO.println s!"Outer tab bar: y={outerTabBarLayout.y}, h={outerTabBarLayout.height}"
+  IO.println s!"Outer divider: y={outerDividerLayout.y}, h={outerDividerLayout.height}"
+  IO.println s!"Outer content: y={outerContentLayout.y}, h={outerContentLayout.height}"
+  IO.println s!"Middle TabView: y={middleTabViewLayout.y}, h={middleTabViewLayout.height}"
+  IO.println s!"Middle tab bar: y={middleTabBarLayout.y}, h={middleTabBarLayout.height}"
+  IO.println s!"Middle divider: y={middleDividerLayout.y}, h={middleDividerLayout.height}"
+  IO.println s!"Middle content: y={middleContentLayout.y}, h={middleContentLayout.height}"
+  IO.println s!"Inner TabView: y={innerTabViewLayout.y}, h={innerTabViewLayout.height}"
+  IO.println s!"Inner tab bar: y={innerTabBarLayout.y}, h={innerTabBarLayout.height}"
+  IO.println s!"Inner divider: y={innerDividerLayout.y}, h={innerDividerLayout.height}"
+  IO.println s!"Inner content: y={innerContentLayout.y}, h={innerContentLayout.height}"
+
+  -- Most importantly: inner content should have positive dimensions
+  shouldSatisfy (innerContentLayout.width > 0) "inner content should have positive width"
+  shouldSatisfy (innerContentLayout.height > 0) "inner content should have positive height"
+
+  -- The innermost content leaf should be visible
+  shouldSatisfy (innerContentLayout.y + innerContentLayout.height <= 600)
+    "inner content should be within viewport"
+
 
 end TrellisTests.LayoutTests.Grid
