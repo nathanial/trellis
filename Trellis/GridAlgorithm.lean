@@ -5,6 +5,7 @@
 import Trellis.Types
 import Trellis.Grid
 import Trellis.Flex  -- for AlignItems, AlignContent, JustifyContent
+import Trellis.FlexAlgorithm
 import Trellis.Node
 import Trellis.Result
 
@@ -465,6 +466,49 @@ def maxContentInTrack (items : Array GridItemState) (trackIdx : Nat) (isColumn :
     else acc
   ) 0
 
+/-- Compute the available width for a grid item from resolved column tracks. -/
+def computeItemWidthFromTracks (item : GridItemState) (colTracks : Array ResolvedTrack)
+    (columnGap : Length) : Length := Id.run do
+  let mut width : Length := 0
+  for col in [item.colStart:item.colEnd] do
+    if h : col < colTracks.size then
+      width := width + colTracks[col].resolvedSize
+  -- Add gaps between spanned columns
+  let spanCount := item.colEnd - item.colStart
+  if spanCount > 1 then
+    width := width + columnGap * (spanCount - 1).toFloat
+  width
+
+/-- Check if a node is a horizontal wrapped flex container. -/
+def isWrappedHorizontalFlex (node : LayoutNode) : Bool :=
+  match node.flexContainer? with
+  | some props => props.direction.isHorizontal && props.wrap != .nowrap
+  | none => false
+
+/-- Re-measure wrapped flex children using actual column widths.
+    After column sizing, wrapped flex containers need to be laid out with their
+    actual available width to determine how many lines they wrap to. -/
+def remeasureWrappedFlexItems (items : Array GridItemState) (colTracks : Array ResolvedTrack)
+    (columnGap : Length) (getContentSize : LayoutNode → Length × Length)
+    : Array GridItemState := Id.run do
+  let mut result := items
+  for i in [:items.size] do
+    let item := items[i]!
+    if isWrappedHorizontalFlex item.node then
+      let availWidth := computeItemWidthFromTracks item colTracks columnGap
+      -- Run actual flex layout to get the real height
+      match item.node.flexContainer? with
+      | some flexProps =>
+        let flexResult := layoutFlexContainer flexProps item.node.children
+          availWidth 10000  -- Large height, we only care about resulting height
+          {} getContentSize
+        -- Extract the actual height from the flex layout result
+        let actualHeight := flexResult.layouts.foldl (fun acc cl =>
+          max acc (cl.borderRect.y + cl.borderRect.height)) 0
+        result := result.set! i { item with contentHeight := actualHeight }
+      | none => pure ()
+  result
+
 /-- Size tracks based on content and fixed sizes. -/
 def sizeTracksToContent (tracks : Array ResolvedTrack) (items : Array GridItemState)
     (isColumn : Bool) (available : Length) : Array ResolvedTrack := Id.run do
@@ -878,12 +922,19 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   let mut colTracks := initTracks container.templateColumns actualCols availableWidth container.columnGap
   let mut rowTracks := initTracks container.templateRows actualRows availableHeight container.rowGap
 
-  -- Size tracks to content
+  -- Size column tracks to content
   colTracks := sizeTracksToContent colTracks placedItems true availableWidth
-  rowTracks := sizeTracksToContent rowTracks placedItems false availableHeight
 
-  -- Phase 4: Resolve fr units
+  -- Resolve fr units for columns first (need final widths for wrapped flex re-measurement)
   colTracks := resolveFrTracks colTracks availableWidth container.columnGap
+
+  -- Re-measure wrapped flex children now that we know actual column widths
+  let remeasuredItems := remeasureWrappedFlexItems placedItems colTracks container.columnGap getContentSize
+
+  -- Size row tracks to content (using re-measured heights for wrapped flex)
+  rowTracks := sizeTracksToContent rowTracks remeasuredItems false availableHeight
+
+  -- Resolve fr units for rows
   rowTracks := resolveFrTracks rowTracks availableHeight container.rowGap
 
   -- Phase 5: Calculate positions
@@ -891,10 +942,10 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   rowTracks := calculateTrackPositions rowTracks container.rowGap padding.top
 
   -- Phase 5.5: Compute row baselines for baseline alignment
-  let rowBaselines := computeRowBaselines placedItems rowTracks.size container.alignItems
+  let rowBaselines := computeRowBaselines remeasuredItems rowTracks.size container.alignItems
 
   -- Phase 6: Position items
-  let positionedItems := positionGridItems placedItems rowTracks colTracks container rowBaselines
+  let positionedItems := positionGridItems remeasuredItems rowTracks colTracks container rowBaselines
 
   -- Build result
   let mut result := LayoutResult.empty

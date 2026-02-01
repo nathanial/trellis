@@ -700,6 +700,54 @@ test "grid baseline: different rows have independent baselines" := do
   shouldBeNear cl1.y 0 0.01
   shouldSatisfy (cl2.y > cl1.y) "item 2 should be in second row"
 
+/-! ## Grid with Wrapped Flex Children -/
+
+test "grid auto row sizes correctly for wrapped flex child" := do
+  -- Grid with: auto row (tab bar), fixed 1px divider, fr row (content)
+  -- The first row contains a wrapped flex container with 4 tabs
+  -- In a 200px wide container, 4 x 60px tabs should wrap to 2 lines
+  let gridProps := GridContainer.withTemplate
+    #[.auto, .fixed (.length 1.0), .fr 1]  -- 3 rows: auto, 1px, fill
+    #[.fr 1]                                -- 1 column
+  let flexProps : FlexContainer := {
+    direction := .row
+    wrap := .wrap
+    gap := 0
+    rowGap := 0
+  }
+  -- Tab bar: 4 tabs, each 60px wide x 30px tall
+  -- In 200px container: 3 tabs fit on first line, 1 wraps to second line
+  -- Expected tab bar height: 60px (2 lines x 30px each)
+  let tabBar := LayoutNode.flexBox 1 flexProps #[
+    LayoutNode.leaf 2 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 3 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 4 (ContentSize.mk' 60 30),
+    LayoutNode.leaf 5 (ContentSize.mk' 60 30)
+  ]
+  let divider := LayoutNode.leaf 6 (ContentSize.mk' 0 1)
+  let content := LayoutNode.leaf 7 (ContentSize.mk' 0 50)
+
+  let node := LayoutNode.gridBox 0 gridProps #[tabBar, divider, content]
+  let result := layout node 200 200
+
+  let tabBarLayout := result.get! 1
+  let dividerLayout := result.get! 6
+  let contentLayout := result.get! 7
+
+  -- Tab bar should be 60px tall (2 wrapped lines of 30px each)
+  shouldBeNear tabBarLayout.height 60 0.01
+
+  -- Divider should start at y=60 (after the 2-line tab bar)
+  shouldBeNear dividerLayout.y 60 0.01
+  shouldBeNear dividerLayout.height 1 0.01
+
+  -- Content should start at y=61 (after tab bar + divider)
+  shouldBeNear contentLayout.y 61 0.01
+
+  -- Content should NOT overlap with tab bar
+  -- (This is the actual bug: content starts at ~31 instead of 61)
+  shouldSatisfy (contentLayout.y >= tabBarLayout.y + tabBarLayout.height)
+    "content should not overlap with tab bar"
 
 
 end TrellisTests.LayoutTests.Grid
