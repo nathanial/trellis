@@ -13,6 +13,7 @@ import Trellis.Grid
 import Trellis.Node
 import Trellis.Axis
 import Trellis.Result
+import Trellis.Debug
 import Trellis.FlexAlgorithm
 import Trellis.GridAlgorithm
 
@@ -243,7 +244,7 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
 
     | .grid props =>
       let childLayout := layoutGridContainerInternal props node.children width height box.padding
-        getSize item.subgridContext
+        getSize item.subgridContext false
       let childResult := childLayout.result
       let translateLayout := fun (cl : ComputedLayout) =>
         { cl with
@@ -268,5 +269,87 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
       pure ()
 
   result
+
+/-! ## Layout With Debug -/
+
+/-- Iteratively layout a tree starting from the root, collecting debug info. -/
+def layoutDebug (root : LayoutNode) (availableWidth availableHeight : Length) : LayoutDebugResult := Id.run do
+  let allSizes := measureAllIntrinsicSizes root
+  let getSize : LayoutNode → Length × Length := fun node =>
+    allSizes.getD node.id (0, 0)
+
+  let mut result : LayoutResult := LayoutResult.empty
+  let mut debug : LayoutDebug := { intrinsicSizes := allSizes }
+  let mut stack : Array LayoutWorkItem := #[⟨root, availableWidth, availableHeight, 0, 0, true, none⟩]
+
+  while !stack.isEmpty do
+    let item := stack.back!
+    stack := stack.pop
+    let node := item.node
+    let box := node.box
+
+    let contentSize := getSize node
+    let isContainer := !node.isLeaf
+    let resolvedWidth := match box.width with
+      | .auto => if isContainer then item.availableWidth else contentSize.1
+      | dim => dim.resolve item.availableWidth contentSize.1
+    let resolvedHeight := match box.height with
+      | .auto => if isContainer then item.availableHeight else contentSize.2
+      | dim => dim.resolve item.availableHeight contentSize.2
+    let (resolvedWidth, resolvedHeight) := applyAspectRatio resolvedWidth resolvedHeight
+      box.width.isAuto box.height.isAuto box.aspectRatio
+    let width := box.clampWidth resolvedWidth
+    let height := box.clampHeight resolvedHeight
+
+    if item.addOwnLayout then
+      let nodeRect := LayoutRect.mk' item.offsetX item.offsetY width height
+      result := result.add (ComputedLayout.withPadding node.id nodeRect box.padding)
+
+    match node.container with
+    | .flex props =>
+      let (childResult, flexDebug) :=
+        layoutFlexContainerDebug props node.children width height box.padding getSize
+      debug := { debug with flex := debug.flex.insert node.id flexDebug }
+      let translateLayout := fun (cl : ComputedLayout) =>
+        { cl with
+          borderRect := cl.borderRect.translate item.offsetX item.offsetY
+          contentRect := cl.contentRect.translate item.offsetX item.offsetY
+        }
+      for cl in childResult.layouts do
+        result := result.add (translateLayout cl)
+
+      for child in node.children.reverse do
+        if !child.isLeaf then
+          if let some cl := childResult.get child.id then
+            let cl := translateLayout cl
+            stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
+                                 cl.borderRect.x, cl.borderRect.y, false, none⟩
+
+    | .grid props =>
+      let childLayout := layoutGridContainerInternal props node.children width height box.padding
+        getSize item.subgridContext true
+      let childResult := childLayout.result
+      if let some gridDebug := childLayout.debug then
+        debug := { debug with grid := debug.grid.insert node.id gridDebug }
+      let translateLayout := fun (cl : ComputedLayout) =>
+        { cl with
+          borderRect := cl.borderRect.translate item.offsetX item.offsetY
+          contentRect := cl.contentRect.translate item.offsetX item.offsetY
+        }
+      for cl in childResult.layouts do
+        result := result.add (translateLayout cl)
+
+      for child in node.children.reverse do
+        if !child.isLeaf then
+          if let some cl := childResult.get child.id then
+            let cl := translateLayout cl
+            let subgridCtx := findSubgridContext childLayout.subgridContexts child.id
+            stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
+                                 cl.borderRect.x, cl.borderRect.y, false, subgridCtx⟩
+
+    | .none =>
+      pure ()
+
+  { result, debug }
 
 end Trellis

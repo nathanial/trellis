@@ -7,6 +7,7 @@ import Trellis.Flex
 import Trellis.Node
 import Trellis.Axis
 import Trellis.Result
+import Trellis.Debug
 
 namespace Trellis
 
@@ -655,6 +656,35 @@ def measureFlexCrossSizeGivenMain (container : FlexContainer) (children : Array 
 
 /-! ## Main Flex Layout Function -/
 
+/-- Convert a FlexItemState into a debug record. -/
+def toFlexItemDebug (item : FlexItemState) : FlexItemDebug := {
+  nodeId := item.node.id
+  sourceIndex := item.sourceIndex
+  margin := item.margin
+  hypotheticalMainSize := item.hypotheticalMainSize
+  flexBaseSize := item.flexBaseSize
+  minMainSize := item.minMainSize
+  maxMainSize := item.maxMainSize
+  hypotheticalCrossSize := item.hypotheticalCrossSize
+  flexGrow := item.flexGrow
+  flexShrink := item.flexShrink
+  baseline := item.baseline
+  frozen := item.frozen
+  resolvedMainSize := item.resolvedMainSize
+  resolvedCrossSize := item.resolvedCrossSize
+}
+
+/-- Convert a FlexLine into a debug record with computed positions. -/
+def toFlexLineDebug (line : FlexLine) (mainPositions crossPositions : Array Length) : FlexLineDebug := {
+  items := line.items.map toFlexItemDebug
+  usedMainSpace := line.usedMainSpace
+  crossSize := line.crossSize
+  crossPosition := line.crossPosition
+  maxBaseline := line.maxBaseline
+  mainPositions := mainPositions
+  crossPositions := crossPositions
+}
+
 /-- Layout a flex container. -/
 def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode)
     (containerWidth containerHeight : Length)
@@ -774,5 +804,131 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
     result := result.add (ComputedLayout.simple child.id rect)
 
   result
+
+/-- Layout a flex container with debug output. -/
+def layoutFlexContainerDebug (container : FlexContainer) (children : Array LayoutNode)
+    (containerWidth containerHeight : Length)
+    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length)
+    : LayoutResult × FlexLayoutDebug := Id.run do
+  let axis := AxisInfo.fromDirection container.direction
+  let (availableWidth, availableHeight) :=
+    (max 0 (containerWidth - padding.horizontal),
+     max 0 (containerHeight - padding.vertical))
+  let (availableMain, availableCross) :=
+    (axis.mainSize availableWidth availableHeight,
+     axis.crossSize availableWidth availableHeight)
+
+  let (flowChildren, absChildren) := partitionAbsoluteFlex children
+
+  let mut debugLines : Array FlexLineDebug := #[]
+  let mut itemsDebug : Array FlexItemDebug := #[]
+  let mut sortedItemsDebug : Array FlexItemDebug := #[]
+  let mut result := LayoutResult.empty
+
+  if flowChildren.size <= 1 then
+    if flowChildren.size == 1 then
+      let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
+      itemsDebug := items.map toFlexItemDebug
+      sortedItemsDebug := itemsDebug
+      if items.size == 1 then
+        let usedMain := computeLineMainSpace items container.gap
+        let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
+        let mut line : FlexLine := {
+          items
+          usedMainSpace := usedMain
+          crossSize := crossSize
+          maxBaseline := maxBaseline
+        }
+        line := resolveFlexibleLengths line availableMain container.gap
+        let lineCrossSize :=
+          if container.alignContent == .stretch then availableCross else line.crossSize
+        let isWrapReverse := container.wrap == .wrapReverse
+        let lineCrossPos :=
+          singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
+        line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
+        line := resolveCrossSizes line container.alignItems axis
+
+        let mainPositions := computeMainPositions line.items
+          container.justifyContent availableMain
+          container.gap axis.isReversed axis container.marginCollapse
+        let crossPositions := computeCrossPositions line.items
+          container.alignItems line.crossSize line.maxBaseline
+
+        debugLines := debugLines.push (toFlexLineDebug line mainPositions crossPositions)
+
+        let item := line.items[0]!
+        let mainPos := mainPositions[0]! + axis.mainStart padding
+        let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
+        let (x, y) := axis.toXY mainPos crossPos
+        let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
+        let rect := LayoutRect.mk' x y width height
+        result := result.add (ComputedLayout.simple item.node.id rect)
+
+    for child in absChildren do
+      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+      result := result.add (ComputedLayout.simple child.id rect)
+
+    let debug : FlexLayoutDebug := {
+      container := container
+      axis := axis
+      availableMain := availableMain
+      availableCross := availableCross
+      items := itemsDebug
+      sortedItems := sortedItemsDebug
+      lines := debugLines
+    }
+    return (result, debug)
+
+  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
+  itemsDebug := items.map toFlexItemDebug
+  let items := sortFlexItems items
+  sortedItemsDebug := items.map toFlexItemDebug
+
+  let lines := partitionIntoLines items container.wrap availableMain container.gap
+  let lines := lines.map fun line =>
+    resolveFlexibleLengths line availableMain container.gap
+
+  let isWrapReverse := container.wrap == .wrapReverse
+  let lines := if lines.size == 1 && container.alignContent == .stretch then
+    lines.map fun line => { line with crossSize := availableCross }
+  else
+    alignFlexLines lines container.alignContent availableCross container.rowGap isWrapReverse
+
+  let lines := lines.map fun line =>
+    resolveCrossSizes line container.alignItems axis
+
+  for line in lines do
+    let mainPositions := computeMainPositions line.items
+                         container.justifyContent availableMain
+                         container.gap axis.isReversed axis container.marginCollapse
+    let crossPositions := computeCrossPositions line.items
+                          container.alignItems line.crossSize line.maxBaseline
+    debugLines := debugLines.push (toFlexLineDebug line mainPositions crossPositions)
+
+    for i in [:line.items.size] do
+      if h : i < line.items.size then
+        let item := line.items[i]
+        let mainPos := mainPositions[i]! + axis.mainStart padding
+        let crossPos := crossPositions[i]! + line.crossPosition + axis.crossStart padding
+        let (x, y) := axis.toXY mainPos crossPos
+        let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
+        let rect := LayoutRect.mk' x y width height
+        result := result.add (ComputedLayout.simple item.node.id rect)
+
+  for child in absChildren do
+    let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+    result := result.add (ComputedLayout.simple child.id rect)
+
+  let debug : FlexLayoutDebug := {
+    container := container
+    axis := axis
+    availableMain := availableMain
+    availableCross := availableCross
+    items := itemsDebug
+    sortedItems := sortedItemsDebug
+    lines := debugLines
+  }
+
+  (result, debug)
 
 end Trellis

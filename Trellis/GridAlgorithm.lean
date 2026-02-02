@@ -8,6 +8,7 @@ import Trellis.Flex  -- for AlignItems, AlignContent, JustifyContent
 import Trellis.FlexAlgorithm
 import Trellis.Node
 import Trellis.Result
+import Trellis.Debug
 
 namespace Trellis
 
@@ -1033,13 +1034,42 @@ def positionGridItems (items : Array GridItemState) (rowTracks colTracks : Array
 structure GridLayoutInternalResult where
   result : LayoutResult
   subgridContexts : Array (Nat × SubgridContext) := #[]
+  debug : Option GridLayoutDebug := none
 deriving Inhabited
+
+/-- Convert a GridItemState into a debug record. -/
+def toGridItemDebug (item : GridItemState) : GridItemDebug := {
+  nodeId := item.node.id
+  margin := item.margin
+  rowStart := item.rowStart
+  rowEnd := item.rowEnd
+  colStart := item.colStart
+  colEnd := item.colEnd
+  contentWidth := item.contentWidth
+  contentHeight := item.contentHeight
+  baseline := item.baseline
+  resolvedX := item.resolvedX
+  resolvedY := item.resolvedY
+  resolvedWidth := item.resolvedWidth
+  resolvedHeight := item.resolvedHeight
+}
+
+/-- Convert a ResolvedTrack into a debug record. -/
+def toResolvedTrackDebug (track : ResolvedTrack) : ResolvedTrackDebug := {
+  size := track.size
+  baseSize := track.baseSize
+  frValue := track.frValue
+  minSize := track.minSize
+  maxSize := track.maxSize
+  resolvedSize := track.resolvedSize
+  position := track.position
+}
 
 /-- Layout a grid container. -/
 def layoutGridContainerInternal (container : GridContainer) (children : Array LayoutNode)
     (containerWidth containerHeight : Length)
     (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length)
-    (subgridContext : Option SubgridContext) : GridLayoutInternalResult := Id.run do
+    (subgridContext : Option SubgridContext) (debug : Bool := false) : GridLayoutInternalResult := Id.run do
   -- Phase 1: Available space
   let availableWidth := max 0 (containerWidth - padding.horizontal)
   let availableHeight := max 0 (containerHeight - padding.vertical)
@@ -1269,13 +1299,40 @@ def layoutGridContainerInternal (container : GridContainer) (children : Array La
     let rect := resolveAbsoluteRect child availableWidth availableHeight padding getContentSize
     result := result.add (ComputedLayout.simple child.id rect)
 
-  { result, subgridContexts }
+  let debugResult : Option GridLayoutDebug :=
+    if debug then
+      some {
+        container := container
+        availableWidth := availableWidth
+        availableHeight := availableHeight
+        rowGap := rowGap
+        columnGap := colGap
+        expandedRowTracks := expandedRowTracks
+        expandedColTracks := expandedColTracks
+        rowLineNames := rowLineNames
+        colLineNames := colLineNames
+        explicitRows := explicitRows
+        explicitCols := explicitCols
+        actualRows := actualRows
+        actualCols := actualCols
+        useRowSubgrid := useRowSubgrid
+        useColSubgrid := useColSubgrid
+        items := items.map toGridItemDebug
+        placedItems := placedItems.map toGridItemDebug
+        positionedItems := positionedItems.map toGridItemDebug
+        rowTracks := rowTracks.map toResolvedTrackDebug
+        colTracks := colTracks.map toResolvedTrackDebug
+        rowBaselines := rowBaselines
+      }
+    else none
+
+  { result, subgridContexts, debug := debugResult }
 
 /-- Layout a grid container (public wrapper). -/
 def layoutGridContainer (container : GridContainer) (children : Array LayoutNode)
     (containerWidth containerHeight : Length)
     (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutResult :=
   (layoutGridContainerInternal container children containerWidth containerHeight padding
-    getContentSize none).result
+    getContentSize none false).result
 
 end Trellis

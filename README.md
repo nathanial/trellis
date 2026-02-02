@@ -138,6 +138,27 @@ let parent := LayoutNode.gridBox 0
   ]
 ```
 
+### Debug Layout
+
+```lean
+-- Compute layout with debug data for inspection
+let dbg := layoutDebug myLayout 500 200
+
+-- Inspect flex or grid container debug info by node id
+match dbg.debug.flex.get? 0 with
+| some flex =>
+  -- Example: number of lines and their sizes
+  IO.println s!"Lines: {flex.lines.size}"
+| none => pure ()
+
+match dbg.debug.grid.get? 0 with
+| some grid =>
+  -- Example: print resolved column sizes
+  let sizes := grid.colTracks.map (·.resolvedSize)
+  IO.println s!"Cols: {sizes}"
+| none => pure ()
+```
+
 ### Grid Item Placement
 
 ```lean
