@@ -223,9 +223,21 @@ def sliceLineNames (names : LineNameMap) (start stop : Nat) : LineNameMap := Id.
 /-- Build line name mappings from expanded tracks. -/
 def buildTrackLineNames (tracks : Array GridTrack) : LineNameMap := Id.run do
   let mut names : LineNameMap := #[]
-  for i in [:tracks.size] do
-    if let some name := tracks[i]!.name then
-      names := addLineName names name i
+  if tracks.isEmpty then
+    return names
+  let addNames := fun (acc : LineNameMap) (idx : Nat) (lineNames : Array String) =>
+    lineNames.foldl (fun inner name => addLineName inner name idx) acc
+  -- Line 0: names before first track
+  names := addNames names 0 tracks[0]!.startLineNames
+  -- Lines between tracks: end names of previous + start names of next
+  for i in [1:tracks.size] do
+    let prev := tracks[i - 1]!
+    let curr := tracks[i]!
+    names := addNames names i prev.endLineNames
+    names := addNames names i curr.startLineNames
+  -- Line after last track
+  let lastIdx := tracks.size - 1
+  names := addNames names tracks.size tracks[lastIdx]!.endLineNames
   names
 
 /-- Collect named areas from template areas. -/
@@ -407,7 +419,8 @@ def calculateAutoRepeatCount (sizes : Array TrackSize) (available gap : Length) 
       max 1 count  -- At least 1 repeat
 
 /-- Determine repeat count for a track entry. -/
-def repeatEntryCount (mode : RepeatMode) (sizes : Array TrackSize) (available gap : Length) : Nat :=
+def repeatEntryCount (mode : RepeatMode) (tracks : Array GridTrack) (available gap : Length) : Nat :=
+  let sizes := tracks.map (·.size)
   match mode with
   | .count n => n
   | .autoFill => calculateAutoRepeatCount sizes available gap
@@ -419,11 +432,11 @@ def expandEntries (entries : Array TrackEntry) (available gap : Length) : Array 
   for entry in entries do
     match entry with
     | .single track => result := result.push track.size
-    | .repeat mode sizes =>
-      let repeatCount := repeatEntryCount mode sizes available gap
+    | .repeat mode tracks =>
+      let repeatCount := repeatEntryCount mode tracks available gap
       for _ in [:repeatCount] do
-        for size in sizes do
-          result := result.push size
+        for track in tracks do
+          result := result.push track.size
   result
 
 /-- Expand track entries to a flat array of GridTracks (preserving names when available). -/
@@ -432,11 +445,11 @@ def expandEntryTracks (entries : Array TrackEntry) (available gap : Length) : Ar
   for entry in entries do
     match entry with
     | .single track => result := result.push track
-    | .repeat mode sizes =>
-      let repeatCount := repeatEntryCount mode sizes available gap
+    | .repeat mode tracks =>
+      let repeatCount := repeatEntryCount mode tracks available gap
       for _ in [:repeatCount] do
-        for size in sizes do
-          result := result.push { size, name := none }
+        for track in tracks do
+          result := result.push track
   result
 
 /-- Get expanded track sizes from a GridTemplate (handles both legacy tracks and entries). -/
@@ -794,6 +807,71 @@ def autoPlaceItem (item : GridItemState) (occupancy : OccupancyGrid)
   let newCursor : PlacementCursor := { row := newCursorRow, col := newCursorCol }
   (newItem, occ, newCursor)
 
+/-- Auto-place an item with a fixed row span (explicit row, auto column). -/
+def autoPlaceItemFixedRow (item : GridItemState) (occupancy : OccupancyGrid)
+    (cols : Nat) (cursor : PlacementCursor) (flow : GridAutoFlow)
+    : GridItemState × OccupancyGrid × PlacementCursor := Id.run do
+  let rowStart := item.rowStart
+  let rowSpan := item.rowEnd - item.rowStart
+  let colSpan := item.colEnd - item.colStart
+  let isDense := match flow with
+    | .rowDense | .columnDense => true
+    | _ => false
+  let startCol := if !isDense && cursor.row == rowStart then cursor.col else 0
+  let mut occ := occupancy
+  if rowStart + rowSpan > occ.rows then
+    occ := occ.extendRows (rowStart + rowSpan)
+  let mut found := false
+  let mut foundCol := 0
+  for c in [startCol:cols] do
+    if found then break
+    if c + colSpan <= cols then
+      if c + colSpan > occ.cols then
+        occ := occ.extendCols (c + colSpan)
+      if occ.isAreaAvailable rowStart (rowStart + rowSpan) c (c + colSpan) then
+        foundCol := c
+        found := true
+  let resolvedCol := if found then foundCol else 0
+  occ := occ.markOccupied rowStart (rowStart + rowSpan) resolvedCol (resolvedCol + colSpan)
+  let newItem := { item with colStart := resolvedCol, colEnd := resolvedCol + colSpan }
+  let newCursor : PlacementCursor := { row := rowStart, col := resolvedCol + colSpan }
+  (newItem, occ, newCursor)
+
+/-- Auto-place an item with a fixed column span (explicit column, auto row). -/
+def autoPlaceItemFixedCol (item : GridItemState) (occupancy : OccupancyGrid)
+    (rows : Nat) (cursor : PlacementCursor) (flow : GridAutoFlow)
+    : GridItemState × OccupancyGrid × PlacementCursor := Id.run do
+  let colStart := item.colStart
+  let rowSpan := item.rowEnd - item.rowStart
+  let colSpan := item.colEnd - item.colStart
+  let isDense := match flow with
+    | .rowDense | .columnDense => true
+    | _ => false
+  let isColumnFlow := match flow with
+    | .column | .columnDense => true
+    | _ => false
+  let startRow := if !isDense && cursor.col == colStart then cursor.row else 0
+  let maxRow := if isColumnFlow then rows else occupancy.rows + 10
+  let mut occ := occupancy
+  if colStart + colSpan > occ.cols then
+    occ := occ.extendCols (colStart + colSpan)
+  let mut found := false
+  let mut foundRow := 0
+  for r in [startRow:maxRow] do
+    if found then break
+    if isColumnFlow && r + rowSpan > rows then
+      continue
+    if r + rowSpan > occ.rows then
+      occ := occ.extendRows (r + rowSpan)
+    if occ.isAreaAvailable r (r + rowSpan) colStart (colStart + colSpan) then
+      foundRow := r
+      found := true
+  let resolvedRow := if found then foundRow else 0
+  occ := occ.markOccupied resolvedRow (resolvedRow + rowSpan) colStart (colStart + colSpan)
+  let newItem := { item with rowStart := resolvedRow, rowEnd := resolvedRow + rowSpan }
+  let newCursor : PlacementCursor := { row := resolvedRow + rowSpan, col := colStart }
+  (newItem, occ, newCursor)
+
 /-- Place all grid items, resolving explicit positions and auto-placing others. -/
 def placeAllItems (items : Array GridItemState) (container : GridContainer)
     (explicitRows explicitCols : Nat) (rowLineNames colLineNames : LineNameMap)
@@ -857,6 +935,44 @@ def placeAllItems (items : Array GridItemState) (container : GridContainer)
     if hasExplicitRow && hasExplicitCol then
       -- Already placed
       finalItems := finalItems.push item
+    else if hasExplicitRow && !hasExplicitCol then
+      let (rowStart, rowEnd) := match areaPlacement with
+        | some area => (area.rowStart, area.rowEnd)
+        | none =>
+          let (rs, re) := resolveGridSpan placement.row maxRow rowLineNames
+          (rs, re)
+      let colSpan := getSpanCount placement.column
+      let itemWithSpan := { item with
+        rowStart := rowStart
+        rowEnd := rowEnd
+        colStart := 0
+        colEnd := colSpan
+      }
+      let (placed, newOcc, newCursor) := autoPlaceItemFixedRow itemWithSpan occupancy maxCol cursor container.autoFlow
+      occupancy := newOcc
+      cursor := newCursor
+      maxRow := max maxRow placed.rowEnd
+      maxCol := max maxCol placed.colEnd
+      finalItems := finalItems.push placed
+    else if !hasExplicitRow && hasExplicitCol then
+      let (colStart, colEnd) := match areaPlacement with
+        | some area => (area.colStart, area.colEnd)
+        | none =>
+          let (cs, ce) := resolveGridSpan placement.column maxCol colLineNames
+          (cs, ce)
+      let rowSpan := getSpanCount placement.row
+      let itemWithSpan := { item with
+        rowStart := 0
+        rowEnd := rowSpan
+        colStart := colStart
+        colEnd := colEnd
+      }
+      let (placed, newOcc, newCursor) := autoPlaceItemFixedCol itemWithSpan occupancy maxRow cursor container.autoFlow
+      occupancy := newOcc
+      cursor := newCursor
+      maxRow := max maxRow placed.rowEnd
+      maxCol := max maxCol placed.colEnd
+      finalItems := finalItems.push placed
     else
       -- Auto-place
       let rowSpan := getSpanCount placement.row

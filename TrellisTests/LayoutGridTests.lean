@@ -260,9 +260,9 @@ test "grid places items at explicit positions" := do
 
 test "grid named lines place items by line name" := do
   let columns : Array GridTrack := #[
-    { size := .fr 1, name := some "left" },
-    { size := .fr 1, name := some "main" },
-    { size := .fr 1, name := some "right" }
+    { size := .fr 1, startLineNames := #["left"], endLineNames := #["main"] },
+    { size := .fr 1, endLineNames := #["right"] },
+    { size := .fr 1 }
   ]
   let props : GridContainer := {
     GridContainer.default with
@@ -1108,6 +1108,60 @@ test "grid subgrid rows with local columns" := do
   shouldBeNear cl51.width 70 0.01
   shouldBeNear cl52.width 30 0.01
   shouldBeNear cl52.y 30 0.01
+
+test "grid named lines resolve to boundaries" := do
+  let cols : GridTemplate := GridTemplate.fromEntries #[
+    .single { size := .px 80, startLineNames := #["left"], endLineNames := #["mid"] },
+    .single { size := .px 120, endLineNames := #["right"] }
+  ]
+  let expanded := getExpandedTracks cols 220 0
+  let lineNames := buildTrackLineNames expanded
+  shouldBe (resolveLineName lineNames "mid" false) (some 1)
+  shouldBe (resolveLineName lineNames "right" true) (some 2)
+  let props := { GridContainer.default with
+    templateRows := GridTemplate.fromSizes #[.auto]
+    templateColumns := cols
+  }
+  let namedItem := {
+    GridItem.default with
+      placement := {
+        column := { start := .named "mid", finish := .named "right" }
+      }
+  }
+  let node := LayoutNode.gridBox 0 props #[
+    LayoutNode.leaf' 60 10 20 {} (.gridChild namedItem)
+  ]
+  let result := layout node 220 80
+  let cl60 := result.get! 60
+  shouldBeNear cl60.x 80 0.01
+  shouldBeNear cl60.width 120 0.01
+
+test "grid subgrid inherits parent named lines" := do
+  let cols : GridTemplate := GridTemplate.fromEntries #[
+    .single { size := .px 80, startLineNames := #["left"], endLineNames := #["mid"] },
+    .single { size := .px 120, endLineNames := #["right"] }
+  ]
+  let parentProps := { GridContainer.default with
+    templateRows := GridTemplate.fromSizes #[.auto]
+    templateColumns := cols
+  }
+  let childProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.auto]
+      templateColumns := GridTemplate.subgrid
+  }
+  let namedItem := {
+    GridItem.default with
+      placement := { column := { start := .named "mid", finish := .span 1 } }
+  }
+  let child := LayoutNode.gridBox 70 childProps #[
+    LayoutNode.leaf' 71 10 20 {} (.gridChild namedItem)
+  ] {} (.gridChild (GridItem.span 1 2))
+  let parent := LayoutNode.gridBox 0 parentProps #[child]
+  let result := layout parent 220 80
+  let cl71 := result.get! 71
+  shouldBeNear cl71.x 80 0.01
+  shouldBeNear cl71.width 120 0.01
 
 
 end TrellisTests.LayoutTests.Grid

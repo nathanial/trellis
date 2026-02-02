@@ -7,7 +7,7 @@ Trellis provides CSS-style layout computation without any rendering dependencies
 ## Features
 
 - **Flexbox Layout**: Full flex container support with `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `align-content`, gaps, and flex item properties (`grow`, `shrink`, `basis`)
-- **Grid Layout**: CSS Grid with template rows/columns, `fr` units, auto-placement, explicit positioning, spanning, cell alignment, and subgrid
+- **Grid Layout**: CSS Grid with template rows/columns, `fr` units, auto-placement, explicit positioning, spanning, cell alignment, named lines (boundary-based), and subgrid
 - **Box Model**: Margin, padding, min/max constraints, and CSS dimension values (`auto`, `length`, `percent`, `min-content`, `max-content`)
 - **Pure Computation**: No side effects, no rendering - just layout math
 
@@ -156,6 +156,28 @@ let parent := LayoutNode.gridBox 0
   justifySelf := some .center
   alignSelf := some .flexEnd
 }
+```
+
+### Named Lines (Boundary-Based)
+
+```lean
+-- Line names live on boundaries between tracks.
+-- startLineNames apply before the track; endLineNames apply after the track.
+let cols : GridTemplate := GridTemplate.fromEntries #[
+  .single { size := .px 120, startLineNames := #["left"], endLineNames := #["mid"] },
+  .single { size := .px 80, endLineNames := #["right"] }
+]
+
+let namedGrid := LayoutNode.gridBox 0
+  { GridContainer.default with
+    templateRows := GridTemplate.fromSizes #[.auto]
+    templateColumns := cols
+  }
+  #[
+    LayoutNode.leaf' 1 0 20 {} (.gridChild {
+      placement := { column := { start := .named "mid", finish := .named "right" } }
+    })
+  ]
 ```
 
 ### Box Constraints

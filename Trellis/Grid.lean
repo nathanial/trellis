@@ -45,13 +45,14 @@ deriving Repr, BEq, Inhabited
 /-- A single grid track definition. -/
 structure GridTrack where
   size : TrackSize := .fixed .auto
-  name : Option String := none  -- Optional line name
+  startLineNames : Array String := #[]  -- Line names before this track
+  endLineNames : Array String := #[]    -- Line names after this track
 deriving Repr, BEq, Inhabited
 
 /-- A track entry in a template (single track or repeat). -/
 inductive TrackEntry where
   | single (track : GridTrack)
-  | repeat (mode : RepeatMode) (sizes : Array TrackSize)
+  | repeat (mode : RepeatMode) (tracks : Array GridTrack)
 deriving Repr, BEq, Inhabited
 
 namespace TrackEntry
@@ -62,15 +63,15 @@ def fromSize (size : TrackSize) : TrackEntry :=
 
 /-- Create a repeat entry with a count. -/
 def repeated (n : Nat) (sizes : Array TrackSize) : TrackEntry :=
-  .repeat (.count n) sizes
+  .repeat (.count n) (sizes.map fun size => { size })
 
 /-- Create an auto-fill repeat entry. -/
 def autoFill (sizes : Array TrackSize) : TrackEntry :=
-  .repeat .autoFill sizes
+  .repeat .autoFill (sizes.map fun size => { size })
 
 /-- Create an auto-fit repeat entry. -/
 def autoFit (sizes : Array TrackSize) : TrackEntry :=
-  .repeat .autoFit sizes
+  .repeat .autoFit (sizes.map fun size => { size })
 
 end TrackEntry
 
@@ -103,7 +104,7 @@ def subgrid : GridTemplate :=
 
 /-- Create a template from track sizes (legacy, no repeats). -/
 def fromSizes (sizes : Array TrackSize) : GridTemplate :=
-  { tracks := sizes.map (GridTrack.mk · none) }
+  { tracks := sizes.map fun size => { size } }
 
 /-- Create a template from track entries (supports repeats). -/
 def fromEntries (entries : Array TrackEntry) : GridTemplate :=
@@ -119,19 +120,19 @@ def pixels (sizes : Array Length) : GridTemplate :=
 
 /-- Create a template with a repeat() function. -/
 def withRepeat (mode : RepeatMode) (sizes : Array TrackSize) : GridTemplate :=
-  { entries := #[.repeat mode sizes] }
+  { entries := #[.repeat mode (sizes.map fun size => { size })] }
 
 /-- Create a template with repeat(n, size). -/
 def repeatCount (n : Nat) (sizes : Array TrackSize) : GridTemplate :=
-  { entries := #[.repeat (.count n) sizes] }
+  { entries := #[.repeat (.count n) (sizes.map fun size => { size })] }
 
 /-- Create a template with repeat(auto-fill, sizes). -/
 def autoFill (sizes : Array TrackSize) : GridTemplate :=
-  { entries := #[.repeat .autoFill sizes] }
+  { entries := #[.repeat .autoFill (sizes.map fun size => { size })] }
 
 /-- Create a template with repeat(auto-fit, sizes). -/
 def autoFit (sizes : Array TrackSize) : GridTemplate :=
-  { entries := #[.repeat .autoFit sizes] }
+  { entries := #[.repeat .autoFit (sizes.map fun size => { size })] }
 
 end GridTemplate
 
