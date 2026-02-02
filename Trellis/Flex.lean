@@ -63,6 +63,13 @@ inductive AlignContent where
   | spaceEvenly  -- Equal space everywhere
 deriving Repr, BEq, Inhabited
 
+/-- Visibility of a flex item. -/
+inductive Visibility where
+  | visible   -- Normal rendering (default)
+  | hidden    -- Hidden but occupies space
+  | collapse  -- Collapsed: removed from main-axis flow, preserves line cross-size
+deriving Repr, BEq, Inhabited
+
 /-- Properties for a flex container. -/
 structure FlexContainer where
   direction : FlexDirection := .row
@@ -104,6 +111,7 @@ structure FlexItem where
   basis : Dimension := .auto -- Initial main size before grow/shrink
   alignSelf : Option AlignItems := none  -- Override container's alignItems
   order : Int := 0           -- Visual ordering (lower values first)
+  visibility : Visibility := .visible  -- Visibility; collapse preserves line cross-size
 deriving Repr, BEq, Inhabited
 
 namespace FlexItem

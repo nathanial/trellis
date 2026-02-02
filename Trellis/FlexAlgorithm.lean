@@ -16,6 +16,8 @@ namespace Trellis
 /-- Intermediate state for a flex item during layout computation. -/
 structure FlexItemState where
   node : LayoutNode
+  /-- Visibility (affects collapse behavior). -/
+  visibility : Visibility := .visible
   /-- Original index in children array (for stable sort by order). -/
   sourceIndex : Nat
   /-- Outer margin. -/
@@ -72,6 +74,14 @@ def unfrozenCount (line : FlexLine) : Nat :=
 
 end FlexLine
 
+def isCollapsed (item : FlexItemState) : Bool :=
+  item.visibility == .collapse
+
+def isCollapsedNode (node : LayoutNode) : Bool :=
+  match node.flexItem? with
+  | some props => props.visibility == .collapse
+  | none => false
+
 /-! ## Margin Collapse -/
 
 /-- Calculate collapsed margin between two adjacent margins per CSS rules.
@@ -120,6 +130,7 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
   for idx in [:children.size] do
     let child := children[idx]!
     let flexProps := child.flexItem?.getD FlexItem.default
+    let visibility := flexProps.visibility
     let contentSize := getContentSize child
     let contentMain := axis.mainFromPair contentSize
     let contentCross := axis.crossFromPair contentSize
@@ -163,6 +174,7 @@ def collectFlexItems (axis : AxisInfo) (children : Array LayoutNode)
 
     items := items.push {
       node := child
+      visibility := visibility
       sourceIndex := idx
       margin := box.margin
       hypotheticalMainSize := hypotheticalMain
@@ -220,25 +232,23 @@ def partitionIntoLines (items : Array FlexItemState) (wrapMode : FlexWrap)
     (availableMain gap : Length) : Array FlexLine := Id.run do
   if items.isEmpty then return #[]
 
-  match wrapMode with
-  | .nowrap =>
-    -- Single line with all items
-    let usedSpace := computeLineMainSpace items gap
-    let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
-    #[{ items, usedMainSpace := usedSpace, crossSize, maxBaseline }]
-  | .wrap | .wrapReverse =>
-    let mut lines : Array FlexLine := #[]
-    let mut currentItems : Array FlexItemState := #[]
-    let mut currentUsed : Length := 0
+  let mut lines : Array FlexLine := #[]
+  let mut currentItems : Array FlexItemState := #[]
+  let mut currentUsed : Length := 0
+  let mut currentCollapsedCross : Length := 0
 
-    for item in items do
+  for item in items do
+    if isCollapsed item then
+      let collapsedCross := item.hypotheticalCrossSize + item.margin.vertical
+      currentCollapsedCross := max currentCollapsedCross collapsedCross
+    else
       let itemSize := item.hypotheticalMainSize + item.margin.horizontal
       let wouldUse := currentUsed + itemSize +
         (if currentItems.isEmpty then 0 else gap)
 
-      if !currentItems.isEmpty && wouldUse > availableMain then
-        -- Start new line
-        let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline currentItems
+      if wrapMode != .nowrap && !currentItems.isEmpty && wouldUse > availableMain then
+        let (crossSizeVisible, maxBaseline) := computeLineCrossSizeWithBaseline currentItems
+        let crossSize := max crossSizeVisible currentCollapsedCross
         lines := lines.push {
           items := currentItems
           usedMainSpace := currentUsed
@@ -247,22 +257,23 @@ def partitionIntoLines (items : Array FlexItemState) (wrapMode : FlexWrap)
         }
         currentItems := #[item]
         currentUsed := itemSize
+        currentCollapsedCross := 0
       else
         currentItems := currentItems.push item
         currentUsed := wouldUse
 
-    -- Add last line
-    if !currentItems.isEmpty then
-      let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline currentItems
-      lines := lines.push {
-        items := currentItems
-        usedMainSpace := currentUsed
-        crossSize
-        maxBaseline
-      }
+  if !currentItems.isEmpty || currentCollapsedCross > 0 then
+    let (crossSizeVisible, maxBaseline) := computeLineCrossSizeWithBaseline currentItems
+    let crossSize := max crossSizeVisible currentCollapsedCross
+    lines := lines.push {
+      items := currentItems
+      usedMainSpace := currentUsed
+      crossSize
+      maxBaseline
+    }
 
-    -- Note: wrap-reverse cross-axis direction is handled in alignFlexLines
-    lines
+  -- Note: wrap-reverse cross-axis direction is handled in alignFlexLines
+  lines
 
 /-! ## Phase 4: Resolve Flexible Lengths -/
 
@@ -701,54 +712,53 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
   -- Phase 2: Collect items
   let (flowChildren, absChildren) := partitionAbsoluteFlex children
+  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
+  let hasCollapsed := items.any isCollapsed
 
   -- Fast path: 0 or 1 flow child (avoids sorting, line partitioning, and extra passes)
-  if flowChildren.size <= 1 then
+  if flowChildren.size <= 1 && !hasCollapsed then
     let mut result := LayoutResult.empty
-    if flowChildren.size == 1 then
-      let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
-      if items.size == 1 then
-        let usedMain := computeLineMainSpace items container.gap
-        let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
-        let mut line : FlexLine := {
-          items
-          usedMainSpace := usedMain
-          crossSize := crossSize
-          maxBaseline := maxBaseline
-        }
-        -- Resolve flexible lengths and line sizing
-        line := resolveFlexibleLengths line availableMain container.gap
-        let lineCrossSize :=
-          if container.alignContent == .stretch then availableCross else line.crossSize
-        let isWrapReverse := container.wrap == .wrapReverse
-        let lineCrossPos :=
-          singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
-        line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
-        line := resolveCrossSizes line container.alignItems axis
+    if items.size == 1 then
+      let usedMain := computeLineMainSpace items container.gap
+      let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
+      let mut line : FlexLine := {
+        items
+        usedMainSpace := usedMain
+        crossSize := crossSize
+        maxBaseline := maxBaseline
+      }
+      -- Resolve flexible lengths and line sizing
+      line := resolveFlexibleLengths line availableMain container.gap
+      let lineCrossSize :=
+        if container.alignContent == .stretch then availableCross else line.crossSize
+      let isWrapReverse := container.wrap == .wrapReverse
+      let lineCrossPos :=
+        singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
+      line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
+      line := resolveCrossSizes line container.alignItems axis
 
-        -- Positions for the single item
-        let mainPositions := computeMainPositions line.items
-          container.justifyContent availableMain
-          container.gap axis.isReversed axis container.marginCollapse
-        let crossPositions := computeCrossPositions line.items
-          container.alignItems line.crossSize line.maxBaseline
+      -- Positions for the single item
+      let mainPositions := computeMainPositions line.items
+        container.justifyContent availableMain
+        container.gap axis.isReversed axis container.marginCollapse
+      let crossPositions := computeCrossPositions line.items
+        container.alignItems line.crossSize line.maxBaseline
 
-        let item := line.items[0]!
-        let mainPos := mainPositions[0]! + axis.mainStart padding
-        let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
-        let (x, y) := axis.toXY mainPos crossPos
-        let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
-        let rect := LayoutRect.mk' x y width height
-        result := result.add (ComputedLayout.simple item.node.id rect)
+      let item := line.items[0]!
+      let mainPos := mainPositions[0]! + axis.mainStart padding
+      let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
+      let (x, y) := axis.toXY mainPos crossPos
+      let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
+      let rect := LayoutRect.mk' x y width height
+      result := result.add (ComputedLayout.simple item.node.id rect)
 
     -- Absolute positioned children (do not affect layout flow)
     for child in absChildren do
-      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
-      result := result.add (ComputedLayout.simple child.id rect)
+      if !isCollapsedNode child then
+        let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+        result := result.add (ComputedLayout.simple child.id rect)
 
     return result
-
-  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
 
   -- Sort items by order (stable: items with same order keep source order)
   let items := sortFlexItems items
@@ -800,8 +810,9 @@ def layoutFlexContainer (container : FlexContainer) (children : Array LayoutNode
 
   -- Absolute positioned children (do not affect layout flow)
   for child in absChildren do
-    let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
-    result := result.add (ComputedLayout.simple child.id rect)
+    if !isCollapsedNode child then
+      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+      result := result.add (ComputedLayout.simple child.id rect)
 
   result
 
@@ -819,54 +830,55 @@ def layoutFlexContainerDebug (container : FlexContainer) (children : Array Layou
      axis.crossSize availableWidth availableHeight)
 
   let (flowChildren, absChildren) := partitionAbsoluteFlex children
+  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
+  let hasCollapsed := items.any isCollapsed
 
   let mut debugLines : Array FlexLineDebug := #[]
   let mut itemsDebug : Array FlexItemDebug := #[]
   let mut sortedItemsDebug : Array FlexItemDebug := #[]
   let mut result := LayoutResult.empty
 
-  if flowChildren.size <= 1 then
-    if flowChildren.size == 1 then
-      let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
-      itemsDebug := items.map toFlexItemDebug
-      sortedItemsDebug := itemsDebug
-      if items.size == 1 then
-        let usedMain := computeLineMainSpace items container.gap
-        let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
-        let mut line : FlexLine := {
-          items
-          usedMainSpace := usedMain
-          crossSize := crossSize
-          maxBaseline := maxBaseline
-        }
-        line := resolveFlexibleLengths line availableMain container.gap
-        let lineCrossSize :=
-          if container.alignContent == .stretch then availableCross else line.crossSize
-        let isWrapReverse := container.wrap == .wrapReverse
-        let lineCrossPos :=
-          singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
-        line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
-        line := resolveCrossSizes line container.alignItems axis
+  if flowChildren.size <= 1 && !hasCollapsed then
+    itemsDebug := items.map toFlexItemDebug
+    sortedItemsDebug := itemsDebug
+    if items.size == 1 then
+      let usedMain := computeLineMainSpace items container.gap
+      let (crossSize, maxBaseline) := computeLineCrossSizeWithBaseline items
+      let mut line : FlexLine := {
+        items
+        usedMainSpace := usedMain
+        crossSize := crossSize
+        maxBaseline := maxBaseline
+      }
+      line := resolveFlexibleLengths line availableMain container.gap
+      let lineCrossSize :=
+        if container.alignContent == .stretch then availableCross else line.crossSize
+      let isWrapReverse := container.wrap == .wrapReverse
+      let lineCrossPos :=
+        singleLineCrossPosition container.alignContent availableCross lineCrossSize isWrapReverse
+      line := { line with crossSize := lineCrossSize, crossPosition := lineCrossPos }
+      line := resolveCrossSizes line container.alignItems axis
 
-        let mainPositions := computeMainPositions line.items
-          container.justifyContent availableMain
-          container.gap axis.isReversed axis container.marginCollapse
-        let crossPositions := computeCrossPositions line.items
-          container.alignItems line.crossSize line.maxBaseline
+      let mainPositions := computeMainPositions line.items
+        container.justifyContent availableMain
+        container.gap axis.isReversed axis container.marginCollapse
+      let crossPositions := computeCrossPositions line.items
+        container.alignItems line.crossSize line.maxBaseline
 
-        debugLines := debugLines.push (toFlexLineDebug line mainPositions crossPositions)
+      debugLines := debugLines.push (toFlexLineDebug line mainPositions crossPositions)
 
-        let item := line.items[0]!
-        let mainPos := mainPositions[0]! + axis.mainStart padding
-        let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
-        let (x, y) := axis.toXY mainPos crossPos
-        let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
-        let rect := LayoutRect.mk' x y width height
-        result := result.add (ComputedLayout.simple item.node.id rect)
+      let item := line.items[0]!
+      let mainPos := mainPositions[0]! + axis.mainStart padding
+      let crossPos := crossPositions[0]! + line.crossPosition + axis.crossStart padding
+      let (x, y) := axis.toXY mainPos crossPos
+      let (width, height) := axis.toWidthHeight item.resolvedMainSize item.resolvedCrossSize
+      let rect := LayoutRect.mk' x y width height
+      result := result.add (ComputedLayout.simple item.node.id rect)
 
     for child in absChildren do
-      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
-      result := result.add (ComputedLayout.simple child.id rect)
+      if !isCollapsedNode child then
+        let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+        result := result.add (ComputedLayout.simple child.id rect)
 
     let debug : FlexLayoutDebug := {
       container := container
@@ -879,7 +891,6 @@ def layoutFlexContainerDebug (container : FlexContainer) (children : Array Layou
     }
     return (result, debug)
 
-  let items := collectFlexItems axis flowChildren availableMain (some availableCross) getContentSize
   itemsDebug := items.map toFlexItemDebug
   let items := sortFlexItems items
   sortedItemsDebug := items.map toFlexItemDebug
@@ -916,8 +927,9 @@ def layoutFlexContainerDebug (container : FlexContainer) (children : Array Layou
         result := result.add (ComputedLayout.simple item.node.id rect)
 
   for child in absChildren do
-    let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
-    result := result.add (ComputedLayout.simple child.id rect)
+    if !isCollapsedNode child then
+      let rect := resolveAbsoluteRectFlex child availableWidth availableHeight padding getContentSize
+      result := result.add (ComputedLayout.simple child.id rect)
 
   let debug : FlexLayoutDebug := {
     container := container

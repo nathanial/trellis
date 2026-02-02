@@ -174,6 +174,28 @@ test "align-items: stretch makes items fill cross axis" := do
   shouldBeNear cl.y 0 0.01
   shouldBeNear cl.height 100 0.01
 
+/-! ## Flex Visibility Tests -/
+
+test "visibility: collapse removes item from main axis but preserves line cross size" := do
+  let collapsed := { FlexItem.default with visibility := .collapse }
+  let props := { FlexContainer.row 10 with alignContent := .flexStart }
+  let node := LayoutNode.flexBox 0 props #[
+    LayoutNode.leaf 1 (ContentSize.mk' 40 10),
+    LayoutNode.leaf 2 (ContentSize.mk' 100 60) {} (.flexChild collapsed),
+    LayoutNode.leaf 3 (ContentSize.mk' 40 20)
+  ]
+  let result := layout node 200 100
+  let cl1 := result.get! 1
+  let cl3 := result.get! 3
+  -- Collapsed item should not have a layout
+  shouldSatisfy (result.get 2 |>.isNone) "collapsed item should be omitted"
+  -- Main-axis placement ignores collapsed item (single gap between visible items)
+  shouldBeNear cl1.x 0 0.01
+  shouldBeNear cl3.x 50 0.01
+  -- Cross-size contribution from collapsed item stretches visible items to 60px
+  shouldBeNear cl1.height 60 0.01
+  shouldBeNear cl3.height 60 0.01
+
 /-! ## Flex Wrap Tests -/
 
 test "flex-wrap: wrap creates multiple lines" := do

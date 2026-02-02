@@ -77,7 +77,7 @@ def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Le
 
       let padding := node.box.padding
       let size := match node.container with
-        | .flex props => measureFlexIntrinsic props childSizes node.children.size padding
+        | .flex props => measureFlexIntrinsic props node.children childSizes padding
         | .grid props => measureGridIntrinsic props childSizes node.children.size padding
         | .none => (0, 0)
 
@@ -85,20 +85,31 @@ def measureAllIntrinsicSizes (root : LayoutNode) : Std.HashMap Nat (Length × Le
 
   sizes
 where
-  measureFlexIntrinsic (props : FlexContainer) (childSizes : Array (Length × Length))
-      (childCount : Nat) (padding : EdgeInsets) : Length × Length :=
+  measureFlexIntrinsic (props : FlexContainer) (children : Array LayoutNode)
+      (childSizes : Array (Length × Length)) (padding : EdgeInsets) : Length × Length := Id.run do
     if childSizes.isEmpty then
-      (padding.horizontal, padding.vertical)
+      return (padding.horizontal, padding.vertical)
+
+    let mut visibleSizes : Array (Length × Length) := #[]
+    for idx in [:childSizes.size] do
+      let child := children[idx]!
+      let size := childSizes[idx]!
+      let isCollapsed := match child.flexItem? with
+        | some props => props.visibility == .collapse
+        | none => false
+      if !isCollapsed then
+        visibleSizes := visibleSizes.push size
+
+    let visibleCount := visibleSizes.size
+    let gapCount := if visibleCount > 0 then (visibleCount - 1).toFloat else 0
+    if props.direction.isHorizontal then
+      let width := visibleSizes.foldl (fun acc sz => acc + sz.1) 0 + props.gap * gapCount
+      let height := childSizes.foldl (fun acc sz => max acc sz.2) 0
+      return (width + padding.horizontal, height + padding.vertical)
     else
-      let gapCount := if childCount > 0 then (childCount - 1).toFloat else 0
-      if props.direction.isHorizontal then
-        let width := childSizes.foldl (fun acc sz => acc + sz.1) 0 + props.gap * gapCount
-        let height := childSizes.foldl (fun acc sz => max acc sz.2) 0
-        (width + padding.horizontal, height + padding.vertical)
-      else
-        let width := childSizes.foldl (fun acc sz => max acc sz.1) 0
-        let height := childSizes.foldl (fun acc sz => acc + sz.2) 0 + props.gap * gapCount
-        (width + padding.horizontal, height + padding.vertical)
+      let width := childSizes.foldl (fun acc sz => max acc sz.1) 0
+      let height := visibleSizes.foldl (fun acc sz => acc + sz.2) 0 + props.gap * gapCount
+      return (width + padding.horizontal, height + padding.vertical)
 
   measureGridIntrinsic (props : GridContainer) (childSizes : Array (Length × Length))
       (childCount : Nat) (padding : EdgeInsets) : Length × Length := Id.run do
