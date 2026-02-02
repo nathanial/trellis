@@ -13,6 +13,7 @@ inductive TrackSize where
   | fr (n : Float)                  -- Fractional unit (flexible space)
   | minmax (min max : TrackSize)    -- minmax(min, max) function
   | fitContent (max : Length)       -- fit-content(max) function
+  | subgrid                         -- Inherit tracks from parent grid
 deriving Repr, BEq, Inhabited
 
 namespace TrackSize
@@ -86,6 +87,19 @@ deriving Repr, BEq, Inhabited
 namespace GridTemplate
 
 def empty : GridTemplate := {}
+
+/-- True if this template declares subgrid tracks. -/
+def isSubgrid (template : GridTemplate) : Bool :=
+  if !template.entries.isEmpty then
+    template.entries.size == 1 && match template.entries[0]! with
+      | .single track => track.size == .subgrid
+      | _ => false
+  else
+    template.tracks.size == 1 && template.tracks[0]!.size == .subgrid
+
+/-- Create a subgrid template. -/
+def subgrid : GridTemplate :=
+  { entries := #[.single { size := .subgrid }] }
 
 /-- Create a template from track sizes (legacy, no repeats). -/
 def fromSizes (sizes : Array TrackSize) : GridTemplate :=

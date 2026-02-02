@@ -7,7 +7,7 @@ Trellis provides CSS-style layout computation without any rendering dependencies
 ## Features
 
 - **Flexbox Layout**: Full flex container support with `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `align-content`, gaps, and flex item properties (`grow`, `shrink`, `basis`)
-- **Grid Layout**: CSS Grid with template rows/columns, `fr` units, auto-placement, explicit positioning, spanning, and cell alignment
+- **Grid Layout**: CSS Grid with template rows/columns, `fr` units, auto-placement, explicit positioning, spanning, cell alignment, and subgrid
 - **Box Model**: Margin, padding, min/max constraints, and CSS dimension values (`auto`, `length`, `percent`, `min-content`, `max-content`)
 - **Pure Computation**: No side effects, no rendering - just layout math
 
@@ -112,6 +112,30 @@ let fullGrid := LayoutNode.gridBox 0
     #[.fr 1, .fr 1, .fr 1]     -- 3 equal columns
     (gap := 8))
   children
+```
+
+### Subgrid
+
+```lean
+-- Parent grid defines the column tracks
+let parent := LayoutNode.gridBox 0
+  { GridContainer.default with
+    templateRows := GridTemplate.fromSizes #[.auto]
+    templateColumns := GridTemplate.fromSizes #[.px 120, .px 80]
+    columnGap := 12
+  }
+  #[
+    -- Child grid inherits the parent's columns via subgrid
+    LayoutNode.gridBox 1
+      { GridContainer.default with
+        templateRows := GridTemplate.fromSizes #[.auto]
+        templateColumns := GridTemplate.subgrid
+      }
+      #[
+        LayoutNode.leaf' 2 120 24 {} (.gridChild (GridItem.atPosition 1 1)),
+        LayoutNode.leaf' 3 80 24 {} (.gridChild (GridItem.atPosition 1 2))
+      ] {} (.gridChild (GridItem.span 1 2))
+  ]
 ```
 
 ### Grid Item Placement

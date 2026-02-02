@@ -176,6 +176,8 @@ private structure LayoutWorkItem where
   /-- Whether to add this node's own layout (true for root, false for children
       since their layouts are already added by parent's layoutFlexContainer/layoutGridContainer) -/
   addOwnLayout : Bool := true
+  /-- Optional subgrid context passed from a parent grid. -/
+  subgridContext : Option SubgridContext := none
 deriving Inhabited
 
 /-- Iteratively layout a tree starting from the root.
@@ -190,7 +192,7 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
     allSizes.getD node.id (0, 0)
 
   let mut result : LayoutResult := LayoutResult.empty
-  let mut stack : Array LayoutWorkItem := #[⟨root, availableWidth, availableHeight, 0, 0, true⟩]
+  let mut stack : Array LayoutWorkItem := #[⟨root, availableWidth, availableHeight, 0, 0, true, none⟩]
 
   while !stack.isEmpty do
     let item := stack.back!
@@ -237,10 +239,12 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
           if let some cl := childResult.get child.id then
             let cl := translateLayout cl
             stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
-                                 cl.borderRect.x, cl.borderRect.y, false⟩
+                                 cl.borderRect.x, cl.borderRect.y, false, none⟩
 
     | .grid props =>
-      let childResult := layoutGridContainer props node.children width height box.padding getSize
+      let childLayout := layoutGridContainerInternal props node.children width height box.padding
+        getSize item.subgridContext
+      let childResult := childLayout.result
       let translateLayout := fun (cl : ComputedLayout) =>
         { cl with
           borderRect := cl.borderRect.translate item.offsetX item.offsetY
@@ -255,8 +259,9 @@ def layout (root : LayoutNode) (availableWidth availableHeight : Length) : Layou
         if !child.isLeaf then
           if let some cl := childResult.get child.id then
             let cl := translateLayout cl
+            let subgridCtx := findSubgridContext childLayout.subgridContexts child.id
             stack := stack.push ⟨child, cl.borderRect.width, cl.borderRect.height,
-                                 cl.borderRect.x, cl.borderRect.y, false⟩
+                                 cl.borderRect.x, cl.borderRect.y, false, subgridCtx⟩
 
     | .none =>
       -- Leaf node, no children to layout

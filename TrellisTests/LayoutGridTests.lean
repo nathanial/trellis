@@ -1026,4 +1026,88 @@ test "nested grids with wrapped flex: TabView inside TabView" := do
     "inner content should be within viewport"
 
 
+/-! ## Subgrid Tests -/
+
+test "grid subgrid columns influence parent track sizing" := do
+  let parentProps := GridContainer.withTemplate #[.auto] #[.auto, .auto]
+  let childProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.auto]
+      templateColumns := GridTemplate.subgrid
+  }
+  let child := LayoutNode.gridBox 10 childProps #[
+    LayoutNode.leaf' 11 150 20 {} (.gridChild (GridItem.atPosition 1 1)),
+    LayoutNode.leaf' 12 50 20 {} (.gridChild (GridItem.atPosition 1 2))
+  ] {} (.gridChild (GridItem.span 1 2))
+  let parent := LayoutNode.gridBox 0 parentProps #[child]
+  let result := layout parent 500 100
+  let cl11 := result.get! 11
+  let cl12 := result.get! 12
+  shouldBeNear cl11.width 150 0.01
+  shouldBeNear cl12.width 50 0.01
+  shouldBeNear cl12.x 150 0.01
+
+test "grid subgrid rows influence parent track sizing" := do
+  let parentProps := GridContainer.withTemplate #[.auto, .auto] #[.auto]
+  let childProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.subgrid
+      templateColumns := GridTemplate.fromSizes #[.auto]
+  }
+  let child := LayoutNode.gridBox 20 childProps #[
+    LayoutNode.leaf' 21 60 40 {} (.gridChild (GridItem.atPosition 1 1)),
+    LayoutNode.leaf' 22 60 20 {} (.gridChild (GridItem.atPosition 2 1))
+  ] {} (.gridChild (GridItem.span 2 1))
+  let parent := LayoutNode.gridBox 0 parentProps #[child]
+  let result := layout parent 200 200
+  let cl21 := result.get! 21
+  let cl22 := result.get! 22
+  shouldBeNear cl21.height 40 0.01
+  shouldBeNear cl22.height 20 0.01
+  shouldBeNear cl22.y 40 0.01
+
+test "grid subgrid inherits parent column gap" := do
+  let parentProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.auto]
+      templateColumns := GridTemplate.fromSizes #[.auto, .auto]
+      columnGap := 10
+  }
+  let childProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.fromSizes #[.auto]
+      templateColumns := GridTemplate.subgrid
+  }
+  let child := LayoutNode.gridBox 30 childProps #[
+    LayoutNode.leaf' 31 40 20 {} (.gridChild (GridItem.atPosition 1 1)),
+    LayoutNode.leaf' 32 60 20 {} (.gridChild (GridItem.atPosition 1 2))
+  ] {} (.gridChild (GridItem.span 1 2))
+  let parent := LayoutNode.gridBox 0 parentProps #[child]
+  let result := layout parent 200 80
+  let cl31 := result.get! 31
+  let cl32 := result.get! 32
+  shouldBeNear cl31.width 40 0.01
+  shouldBeNear cl32.width 60 0.01
+  shouldBeNear cl32.x 50 0.01
+
+test "grid subgrid rows with local columns" := do
+  let parentProps := GridContainer.withTemplate #[.auto, .auto] #[.px 200]
+  let childProps := {
+    GridContainer.default with
+      templateRows := GridTemplate.subgrid
+      templateColumns := GridTemplate.fromSizes #[.auto, .auto]
+  }
+  let child := LayoutNode.gridBox 50 childProps #[
+    LayoutNode.leaf' 51 70 30 {} (.gridChild (GridItem.atPosition 1 1)),
+    LayoutNode.leaf' 52 30 50 {} (.gridChild (GridItem.atPosition 2 2))
+  ] {} (.gridChild (GridItem.span 2 1))
+  let parent := LayoutNode.gridBox 0 parentProps #[child]
+  let result := layout parent 300 200
+  let cl51 := result.get! 51
+  let cl52 := result.get! 52
+  shouldBeNear cl51.width 70 0.01
+  shouldBeNear cl52.width 30 0.01
+  shouldBeNear cl52.y 30 0.01
+
+
 end TrellisTests.LayoutTests.Grid

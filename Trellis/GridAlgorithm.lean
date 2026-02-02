@@ -128,6 +128,28 @@ deriving Repr, Inhabited
 /-- Mapping from line names to line indices (0-indexed). -/
 abbrev LineNameMap := Array (String × Array Nat)
 
+/-! ## Subgrid Context -/
+
+/-- Track data inherited from a parent grid for subgrid layout. -/
+structure SubgridAxisContext where
+  tracks : Array ResolvedTrack
+  lineNames : LineNameMap
+  gap : Length
+deriving Repr, Inhabited
+
+/-- Optional subgrid context for rows/columns. -/
+structure SubgridContext where
+  rows : Option SubgridAxisContext := none
+  cols : Option SubgridAxisContext := none
+deriving Repr, Inhabited
+
+def findSubgridContext (contexts : Array (Nat × SubgridContext)) (nodeId : Nat)
+    : Option SubgridContext := Id.run do
+  for entry in contexts do
+    if entry.fst == nodeId then
+      return some entry.snd
+  none
+
 /-- A named grid area derived from template areas. -/
 structure GridArea where
   name : String
@@ -183,6 +205,19 @@ def mergeLineNames (base extra : LineNameMap) : LineNameMap := Id.run do
     let (name, idxs) := entry
     for idx in idxs do
       result := addLineName result name idx
+  result
+
+/-- Slice and rebase line names to a subrange of tracks. -/
+def sliceLineNames (names : LineNameMap) (start stop : Nat) : LineNameMap := Id.run do
+  let mut result : LineNameMap := #[]
+  for entry in names do
+    let (name, idxs) := entry
+    let mut rebased : Array Nat := #[]
+    for idx in idxs do
+      if start <= idx && idx < stop then
+        rebased := rebased.push (idx - start)
+    if !rebased.isEmpty then
+      result := result.push (name, rebased)
   result
 
 /-- Build line name mappings from expanded tracks. -/
@@ -347,6 +382,7 @@ def resolveToLength (size : TrackSize) (available : Length) : Option Length :=
     | some minLen, some maxLen => some (max minLen maxLen)
     | _, _ => none
   | .fitContent maxLen => some maxLen
+  | .subgrid => none
 
 /-- Calculate the minimum size of a track size (for auto-fill calculation). -/
 def minTrackSize (size : TrackSize) (available : Length) : Length :=
@@ -355,6 +391,7 @@ def minTrackSize (size : TrackSize) (available : Length) : Length :=
   | .fr _ => 0  -- Fr tracks have no intrinsic minimum
   | .minmax minTrack _ => minTrackSize minTrack available
   | .fitContent _ => 0
+  | .subgrid => 0
 
 /-- Calculate how many times a repeat pattern fits in available space (for auto-fill/auto-fit). -/
 def calculateAutoRepeatCount (sizes : Array TrackSize) (available gap : Length) : Nat :=
@@ -404,7 +441,9 @@ def expandEntryTracks (entries : Array TrackEntry) (available gap : Length) : Ar
 
 /-- Get expanded track sizes from a GridTemplate (handles both legacy tracks and entries). -/
 def getExpandedSizes (template : GridTemplate) (available gap : Length) : Array TrackSize :=
-  if template.entries.isEmpty then
+  if GridTemplate.isSubgrid template then
+    #[]
+  else if template.entries.isEmpty then
     -- Use legacy tracks array
     template.tracks.map (·.size)
   else
@@ -413,7 +452,9 @@ def getExpandedSizes (template : GridTemplate) (available gap : Length) : Array 
 
 /-- Get expanded track definitions from a GridTemplate (preserving line names). -/
 def getExpandedTracks (template : GridTemplate) (available gap : Length) : Array GridTrack :=
-  if template.entries.isEmpty then
+  if GridTemplate.isSubgrid template then
+    #[]
+  else if template.entries.isEmpty then
     template.tracks
   else
     expandEntryTracks template.entries available gap
@@ -446,6 +487,7 @@ def resolveTrackBaseSize (size : TrackSize) (available : Length) : Length :=
   | .fr _ => 0  -- Fr tracks start at 0, sized in fr resolution phase
   | .minmax minTrack _ => resolveTrackBaseSize minTrack available
   | .fitContent maxLen => min maxLen available
+  | .subgrid => 0
 
 /-- Calculate the maximum content size for items in a given track (including margins). -/
 def maxContentInTrack (items : Array GridItemState) (trackIdx : Nat) (isColumn : Bool) : Length :=
@@ -471,8 +513,8 @@ def computeItemWidthFromTracks (item : GridItemState) (colTracks : Array Resolve
     (columnGap : Length) : Length := Id.run do
   let mut width : Length := 0
   for col in [item.colStart:item.colEnd] do
-    if h : col < colTracks.size then
-      width := width + colTracks[col].resolvedSize
+    if col < colTracks.size then
+      width := width + colTracks[col]!.resolvedSize
   -- Add gaps between spanned columns
   let spanCount := item.colEnd - item.colStart
   if spanCount > 1 then
@@ -531,6 +573,8 @@ def sizeTracksToContent (tracks : Array ResolvedTrack) (items : Array GridItemSt
           max minSz (min content maxSz)
       | .fitContent maxLen =>
         min (maxContentInTrack items i isColumn) maxLen
+      | .subgrid =>
+        maxContentInTrack items i isColumn
     result := result.set! i { track with baseSize, resolvedSize := baseSize }
   result
 
@@ -573,6 +617,15 @@ def calculateTrackPositions (tracks : Array ResolvedTrack) (gap : Length) (start
     let track := tracks[i]!
     result := result.set! i { track with position := pos }
     pos := pos + track.resolvedSize + gap
+  result
+
+/-- Slice tracks and rebase positions relative to a new origin. -/
+def sliceTracks (tracks : Array ResolvedTrack) (start stop : Nat) (offset : Length) : Array ResolvedTrack := Id.run do
+  let mut result : Array ResolvedTrack := #[]
+  for i in [start:stop] do
+    if i < tracks.size then
+      let track := tracks[i]!
+      result := result.push { track with position := track.position - offset }
   result
 
 /-- Get the bounds of a grid area from track positions. -/
@@ -860,27 +913,46 @@ def positionGridItems (items : Array GridItemState) (rowTracks colTracks : Array
 
 /-! ## Main Grid Layout Function -/
 
+/-- Internal result with optional subgrid contexts for children. -/
+structure GridLayoutInternalResult where
+  result : LayoutResult
+  subgridContexts : Array (Nat × SubgridContext) := #[]
+deriving Inhabited
+
 /-- Layout a grid container. -/
-def layoutGridContainer (container : GridContainer) (children : Array LayoutNode)
+def layoutGridContainerInternal (container : GridContainer) (children : Array LayoutNode)
     (containerWidth containerHeight : Length)
-    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutResult := Id.run do
+    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length)
+    (subgridContext : Option SubgridContext) : GridLayoutInternalResult := Id.run do
   -- Phase 1: Available space
   let availableWidth := max 0 (containerWidth - padding.horizontal)
   let availableHeight := max 0 (containerHeight - padding.vertical)
   let (flowChildren, absChildren) := partitionAbsolute children
 
+  let rowCtx := subgridContext.bind (·.rows)
+  let colCtx := subgridContext.bind (·.cols)
+  let wantsRowSubgrid := GridTemplate.isSubgrid container.templateRows
+  let wantsColSubgrid := GridTemplate.isSubgrid container.templateColumns
+  let useRowSubgrid := wantsRowSubgrid && rowCtx.isSome
+  let useColSubgrid := wantsColSubgrid && colCtx.isSome
+
+  let rowGap := if useRowSubgrid then rowCtx.get!.gap else container.rowGap
+  let colGap := if useColSubgrid then colCtx.get!.gap else container.columnGap
+
   -- Get explicit track counts (from expanded entries, legacy tracks, and template areas)
-  let expandedColTracks := getExpandedTracks container.templateColumns availableWidth container.columnGap
-  let expandedRowTracks := getExpandedTracks container.templateRows availableHeight container.rowGap
+  let expandedColTracks := if useColSubgrid then #[] else
+    getExpandedTracks container.templateColumns availableWidth colGap
+  let expandedRowTracks := if useRowSubgrid then #[] else
+    getExpandedTracks container.templateRows availableHeight rowGap
   let areaDefs := collectTemplateAreas container.templateAreas
   let areaRowCount := GridTemplateAreas.rowCount container.templateAreas
   let areaColCount := GridTemplateAreas.colCount container.templateAreas
-  let explicitCols := max expandedColTracks.size areaColCount
-  let explicitRows := max expandedRowTracks.size areaRowCount
+  let explicitCols := if useColSubgrid then colCtx.get!.tracks.size else max expandedColTracks.size areaColCount
+  let explicitRows := if useRowSubgrid then rowCtx.get!.tracks.size else max expandedRowTracks.size areaRowCount
 
   -- Build line name maps (track names + template area line names)
-  let rowLineNames := buildTrackLineNames expandedRowTracks
-  let colLineNames := buildTrackLineNames expandedColTracks
+  let rowLineNames := if useRowSubgrid then rowCtx.get!.lineNames else buildTrackLineNames expandedRowTracks
+  let colLineNames := if useColSubgrid then colCtx.get!.lineNames else buildTrackLineNames expandedColTracks
   let (areaRowLineNames, areaColLineNames) := buildAreaLineNames areaDefs
   let rowLineNames := mergeLineNames rowLineNames areaRowLineNames
   let colLineNames := mergeLineNames colLineNames areaColLineNames
@@ -917,34 +989,158 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
   let (placedItems, actualRows, actualCols) :=
     placeAllItems items container explicitRows minCols rowLineNames colLineNames areaDefs
 
+  -- Collect subgrid child contributions for track sizing
+  let mut subgridColumnItems : Array GridItemState := #[]
+  let mut subgridRowItems : Array GridItemState := #[]
+
+  for parentItem in placedItems do
+    if let some childContainer := parentItem.node.gridContainer? then
+      let childRowSubgrid := GridTemplate.isSubgrid childContainer.templateRows
+      let childColSubgrid := GridTemplate.isSubgrid childContainer.templateColumns
+      if childRowSubgrid || childColSubgrid then
+        let (childFlow, _) := partitionAbsolute parentItem.node.children
+        let childAreaDefs := collectTemplateAreas childContainer.templateAreas
+        let childAreaRowCount := GridTemplateAreas.rowCount childContainer.templateAreas
+        let childAreaColCount := GridTemplateAreas.colCount childContainer.templateAreas
+
+        let childExpandedRowTracks := if childRowSubgrid then #[] else
+          getExpandedTracks childContainer.templateRows availableHeight childContainer.rowGap
+        let childExpandedColTracks := if childColSubgrid then #[] else
+          getExpandedTracks childContainer.templateColumns availableWidth childContainer.columnGap
+
+        let childExplicitRows := if childRowSubgrid then
+          max 1 (parentItem.rowEnd - parentItem.rowStart)
+        else
+          max childExpandedRowTracks.size childAreaRowCount
+        let childExplicitCols := if childColSubgrid then
+          max 1 (parentItem.colEnd - parentItem.colStart)
+        else
+          max childExpandedColTracks.size childAreaColCount
+
+        let childRowLineNames := if childRowSubgrid then
+          sliceLineNames rowLineNames parentItem.rowStart parentItem.rowEnd
+        else
+          buildTrackLineNames childExpandedRowTracks
+        let childColLineNames := if childColSubgrid then
+          sliceLineNames colLineNames parentItem.colStart parentItem.colEnd
+        else
+          buildTrackLineNames childExpandedColTracks
+        let (childAreaRowLineNames, childAreaColLineNames) := buildAreaLineNames childAreaDefs
+        let childRowLineNames := mergeLineNames childRowLineNames childAreaRowLineNames
+        let childColLineNames := mergeLineNames childColLineNames childAreaColLineNames
+
+        let mut childItems : Array GridItemState := #[]
+        for child in childFlow do
+          let contentSize := getContentSize child
+          let box := child.box
+          let gridItem := child.gridItem?.getD GridItem.default
+          let placement := gridItem.placement
+          let areaPlacement := gridItem.area.bind (findArea childAreaDefs)
+          let (rowStart, rowEnd, colStart, colEnd) := match areaPlacement with
+            | some area => (area.rowStart, area.rowEnd, area.colStart, area.colEnd)
+            | none =>
+              let (rs, re) := resolveGridSpan placement.row childExplicitRows childRowLineNames
+              let (cs, ce) := resolveGridSpan placement.column childExplicitCols childColLineNames
+              (rs, re, cs, ce)
+          let baseline := match child.content with
+            | some cs => cs.getBaseline
+            | none => contentSize.2
+          childItems := childItems.push {
+            node := child
+            margin := box.margin
+            rowStart, rowEnd, colStart, colEnd
+            contentWidth := contentSize.1
+            contentHeight := contentSize.2
+            baseline
+          }
+
+        let childMinCols := max 1 childExplicitCols
+        let (placedChildItems, _, _) :=
+          placeAllItems childItems childContainer childExplicitRows childMinCols
+            childRowLineNames childColLineNames childAreaDefs
+
+        for childItem in placedChildItems do
+          if childColSubgrid then
+            subgridColumnItems := subgridColumnItems.push {
+              childItem with
+                rowStart := 0
+                rowEnd := 1
+                colStart := parentItem.colStart + childItem.colStart
+                colEnd := parentItem.colStart + childItem.colEnd
+            }
+          if childRowSubgrid then
+            subgridRowItems := subgridRowItems.push {
+              childItem with
+                colStart := 0
+                colEnd := 1
+                rowStart := parentItem.rowStart + childItem.rowStart
+                rowEnd := parentItem.rowStart + childItem.rowEnd
+            }
+
   -- Phase 3: Initialize and size tracks (pass gap for auto-fill/auto-fit calculation)
-  let mut colTracks := initTracks container.templateColumns actualCols availableWidth container.columnGap
-  let mut rowTracks := initTracks container.templateRows actualRows availableHeight container.rowGap
+  let baseColumnItems := placedItems.filter fun item =>
+    match item.node.gridContainer? with
+    | some props => !GridTemplate.isSubgrid props.templateColumns
+    | none => true
+  let columnSizingItems := baseColumnItems ++ subgridColumnItems
 
-  -- Size column tracks to content
-  colTracks := sizeTracksToContent colTracks placedItems true availableWidth
+  let mut colTracks := if useColSubgrid then colCtx.get!.tracks else
+    initTracks container.templateColumns actualCols availableWidth colGap
+  let mut rowTracks := if useRowSubgrid then rowCtx.get!.tracks else
+    initTracks container.templateRows actualRows availableHeight rowGap
 
-  -- Resolve fr units for columns first (need final widths for wrapped flex re-measurement)
-  colTracks := resolveFrTracks colTracks availableWidth container.columnGap
+  if !useColSubgrid then
+    colTracks := sizeTracksToContent colTracks columnSizingItems true availableWidth
+    -- Resolve fr units for columns first (need final widths for wrapped flex re-measurement)
+    colTracks := resolveFrTracks colTracks availableWidth colGap
 
   -- Re-measure wrapped flex children now that we know actual column widths
-  let remeasuredItems := remeasureWrappedFlexItems placedItems colTracks container.columnGap getContentSize
+  let remeasuredItems := remeasureWrappedFlexItems placedItems colTracks colGap getContentSize
+  let baseRowItems := remeasuredItems.filter fun item =>
+    match item.node.gridContainer? with
+    | some props => !GridTemplate.isSubgrid props.templateRows
+    | none => true
+  let rowSizingItems := baseRowItems ++ subgridRowItems
 
-  -- Size row tracks to content (using re-measured heights for wrapped flex)
-  rowTracks := sizeTracksToContent rowTracks remeasuredItems false availableHeight
-
-  -- Resolve fr units for rows
-  rowTracks := resolveFrTracks rowTracks availableHeight container.rowGap
+  if !useRowSubgrid then
+    -- Size row tracks to content (using re-measured heights for wrapped flex)
+    rowTracks := sizeTracksToContent rowTracks rowSizingItems false availableHeight
+    -- Resolve fr units for rows
+    rowTracks := resolveFrTracks rowTracks availableHeight rowGap
 
   -- Phase 5: Calculate positions
-  colTracks := calculateTrackPositions colTracks container.columnGap padding.left
-  rowTracks := calculateTrackPositions rowTracks container.rowGap padding.top
+  if !useColSubgrid then
+    colTracks := calculateTrackPositions colTracks colGap padding.left
+  if !useRowSubgrid then
+    rowTracks := calculateTrackPositions rowTracks rowGap padding.top
 
   -- Phase 5.5: Compute row baselines for baseline alignment
   let rowBaselines := computeRowBaselines remeasuredItems rowTracks.size container.alignItems
 
   -- Phase 6: Position items
-  let positionedItems := positionGridItems remeasuredItems rowTracks colTracks container rowBaselines
+  let containerForPosition := { container with rowGap := rowGap, columnGap := colGap }
+  let positionedItems := positionGridItems remeasuredItems rowTracks colTracks containerForPosition rowBaselines
+
+  -- Subgrid contexts for child grids
+  let mut subgridContexts : Array (Nat × SubgridContext) := #[]
+  for item in positionedItems do
+    if let some childContainer := item.node.gridContainer? then
+      let childRowSubgrid := GridTemplate.isSubgrid childContainer.templateRows
+      let childColSubgrid := GridTemplate.isSubgrid childContainer.templateColumns
+      if childRowSubgrid || childColSubgrid then
+        let rowCtx := if childRowSubgrid then
+          some {
+            tracks := sliceTracks rowTracks item.rowStart item.rowEnd item.resolvedY
+            lineNames := sliceLineNames rowLineNames item.rowStart item.rowEnd
+            gap := rowGap
+          } else none
+        let colCtx := if childColSubgrid then
+          some {
+            tracks := sliceTracks colTracks item.colStart item.colEnd item.resolvedX
+            lineNames := sliceLineNames colLineNames item.colStart item.colEnd
+            gap := colGap
+          } else none
+        subgridContexts := subgridContexts.push (item.node.id, { rows := rowCtx, cols := colCtx })
 
   -- Build result
   let mut result := LayoutResult.empty
@@ -957,6 +1153,13 @@ def layoutGridContainer (container : GridContainer) (children : Array LayoutNode
     let rect := resolveAbsoluteRect child availableWidth availableHeight padding getContentSize
     result := result.add (ComputedLayout.simple child.id rect)
 
-  result
+  { result, subgridContexts }
+
+/-- Layout a grid container (public wrapper). -/
+def layoutGridContainer (container : GridContainer) (children : Array LayoutNode)
+    (containerWidth containerHeight : Length)
+    (padding : EdgeInsets) (getContentSize : LayoutNode → Length × Length) : LayoutResult :=
+  (layoutGridContainerInternal container children containerWidth containerHeight padding
+    getContentSize none).result
 
 end Trellis
